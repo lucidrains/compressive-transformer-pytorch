@@ -1,2 +1,38 @@
-# compressive-transformers-pytorch
-Pytorch implementation of Compressive Transformers, from Deepmind (wip)
+## Compressive Transformer in Pytorch (wip)
+
+Pytorch implementation of <a href="https://openreview.net/forum?id=SylKikSYDH">Compressive Transformers</a>, a variant of Transformer-XL with compressed memory for long-range language modelling. I will also combine this with an idea from <a href="https://arxiv.org/abs/1910.06764">another paper</a> that adds gating at the residual intersection. The memory and the gating may be synergistic, and lead to further improvements in both language modeling as well as reinforcement learning. Finally, I will be using a variant of the GRU that uses a concept called bistability to greatly enhance memory as explained <a href="https://arxiv.org/abs/2006.05252">here</a>.
+
+## Citations
+
+```bibtex
+@misc{rae2019compressive,
+    title={Compressive Transformers for Long-Range Sequence Modelling},
+    author={Jack W. Rae and Anna Potapenko and Siddhant M. Jayakumar and Timothy P. Lillicrap},
+    year={2019},
+    eprint={1911.05507},
+    archivePrefix={arXiv},
+    primaryClass={cs.LG}
+}
+```
+
+```bibtex
+@misc{parisotto2019stabilizing,
+    title={Stabilizing Transformers for Reinforcement Learning},
+    author={Emilio Parisotto and H. Francis Song and Jack W. Rae and Razvan Pascanu and Caglar Gulcehre and Siddhant M. Jayakumar and Max Jaderberg and Raphael Lopez Kaufman and Aidan Clark and Seb Noury and Matthew M. Botvinick and Nicolas Heess and Raia Hadsell},
+    year={2019},
+    eprint={1910.06764},
+    archivePrefix={arXiv},
+    primaryClass={cs.LG}
+}
+```
+
+```bibtex
+@misc{vecoven2020bioinspired,
+    title={A bio-inspired bistable recurrent cell allows for long-lasting memory},
+    author={Nicolas Vecoven and Damien Ernst and Guillaume Drion},
+    year={2020},
+    eprint={2006.05252},
+    archivePrefix={arXiv},
+    primaryClass={cs.NE}
+}
+```
