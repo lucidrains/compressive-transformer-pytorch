@@ -4,6 +4,9 @@ import torch.nn.functional as F
 
 # helper functions
 
+def default(x, val):
+    return val if x is None else x
+
 def shift(x):
     *_, i, j = x.shape
     zero_pad = torch.zeros((*_, i, i), **to(x))
@@ -20,17 +23,17 @@ class Residual(nn.Module):
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
-    def forward(self, x):
-        return self.fn(x) + x
+    def forward(self, x, **kwargs):
+        return self.fn(x, **kwargs) + x
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
         self.fn = fn
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = self.norm(x)
-        return self.fn(x)
+        return self.fn(x, **kwargs)
 
 # rel positional embedding
 
@@ -54,7 +57,7 @@ class FeedForward(nn.Module):
             nn.LeakyReLU(inplace = True),
             nn.Linear(dim * mult, dim)
         )
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return self.net(x)
 
 # attention.
@@ -63,16 +66,26 @@ class SelfAttention(nn.Module):
     def __init__(self, dim, heads = 8):
         super().__init__()
         self.heads = heads
-        self.scale = (dim // heads) ** (-0.5)
-        self.to_qkv = nn.Linear(dim, dim * 3, bias = False)
+        self.dim_head = dim // heads
+        self.scale = self.dim_head ** (-0.5)
+        self.to_q = nn.Linear(dim, dim, bias = False)
+        self.to_kv = nn.Linear(dim, dim * 2, bias = False)
         self.to_out = nn.Linear(dim, dim)
-    def forward(self, x):
-        b, t, e, h = *x.shape, self.heads
-        q, k, v = self.to_qkv(x).chunk(3, dim=-1)
-        q, k, v = map(lambda x: x.reshape(b, t, h, -1).transpose(1, 2), (q, k, v))
+
+    def forward(self, x, mem = None, **kwargs):
+        b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
+        mem = default(mem, torch.empty(b, 0, e))
+        mem_len = mem.shape[1]
+
+        q = self.to_q(x)
+
+        kv_input = torch.cat((mem, x), dim=1)
+        k, v = self.to_kv(kv_input).chunk(2, dim=-1)
+
+        q, k, v = map(lambda x: x.reshape(b, -1, h, dim_h).transpose(1, 2), (q, k, v))
 
         dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
-        mask = torch.ones(t, t).triu_().bool()
+        mask = torch.ones(t, t + mem_len).triu_(diagonal = 1 + mem_len).bool()
         dots.masked_fill_(mask[None, None, ...], float('-inf'))
 
         attn = dots.softmax(dim=-1)
@@ -84,22 +97,32 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, max_seq_len, depth, heads = 8):
+    def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, heads = 8):
         super().__init__()
+        self.mem_len = default(mem_len, seq_len)
+        self.seq_len = seq_len
+        self.depth = depth
         self.token_emb = nn.Embedding(num_tokens, dim)
         self.pos_emb = RelativePositionalEmbedding
         self.to_logits = nn.Linear(dim, num_tokens)
 
-        layers = []
-        for _ in range(depth):
-            layers.extend([
-                Residual(PreNorm(dim, SelfAttention(dim, heads))),
-                Residual(PreNorm(dim, FeedForward(dim)))
-            ])
-        self.layers = nn.Sequential(*layers)
+        self.attn_layers = nn.ModuleList([Residual(PreNorm(dim, SelfAttention(dim, heads))) for _ in range(depth)])
+        self.ff_layers = nn.ModuleList([Residual(PreNorm(dim, FeedForward(dim))) for _ in range(depth)])
 
-    def forward(self, x):
+    def forward(self, x, mem = None):
         x = self.token_emb(x)
-        out = self.layers(x)
+        b, t, d = x.shape
+
+        mem = default(mem, torch.empty(self.depth, b, 0, d))
+        hidden_states = []
+
+        for attn, ff, m in zip(self.attn_layers, self.ff_layers, mem):
+            hidden_states.append(x)
+            x = attn(x, mem = m)
+            x = ff(x)
+
         out = self.to_logits(x)
-        return out
+
+        hidden_states = torch.stack(hidden_states)
+        new_mem = torch.cat((mem, hidden_states), dim=2)[:, :, -self.mem_len:, :].detach()
+        return out, new_mem
