@@ -18,6 +18,12 @@ def default(x, val):
         return x
     return val if not isfunction(val) else val()
 
+def split_at_index(dim, index, t):
+    pre_slices = (slice(None),) * dim
+    l = (*pre_slices, slice(None, index))
+    r = (*pre_slices, slice(index, None))
+    return t[l], t[r]
+
 def shift(x):
     *_, i, j = x.shape
     zero_pad = torch.zeros((*_, i, i), **to(x))
@@ -49,6 +55,16 @@ class PreNorm(nn.Module):
         x = self.norm(x)
         return self.fn(x, **kwargs)
 
+class ConvCompress(nn.Module):
+    def __init__(self, dim, ratio = 4):
+        super().__init__()
+        self.conv = nn.Conv1d(dim, dim, ratio, stride = ratio)
+
+    def forward(self, mem):
+        mem = mem.transpose(1, 2)
+        compressed_mem = self.conv(mem)
+        return compressed_mem.transpose(1, 2)
+
 # rel positional embedding
 
 class RelativePositionalEmbedding(nn.Module):
@@ -57,7 +73,7 @@ class RelativePositionalEmbedding(nn.Module):
         self.scale = dim ** -0.5
         self.weights = nn.Parameter(torch.zeros(length, heads, dim))
 
-    def forward(self, q, mem_len = 0):
+    def forward(self, q, mem_len):
         seq_len = q.shape[2] + mem_len
         weights = self.weights[:seq_len].type(q.dtype)
         emb = torch.einsum('bhid,jhd->bhij', q, weights) * self.scale
@@ -78,41 +94,50 @@ class FeedForward(nn.Module):
 
 # attention.
 
-SelfAttentionOutput = namedtuple('SelfAttentionOutput', ['out', 'mem'])
+SelfAttentionOutput = namedtuple('SelfAttentionOutput', ['out', 'mem', 'cmem'])
 
 class SelfAttention(nn.Module):
-    def __init__(self, dim, seq_len, mem_len, heads = 8):
+    def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8):
         super().__init__()
         self.heads = heads
         self.dim_head = dim // heads
         self.seq_len = seq_len
         self.mem_len = mem_len
+        self.cmem_len = cmem_len
+        self.cmem_ratio = cmem_ratio
         self.scale = self.dim_head ** (-0.5)
 
-        self.rel_pos_emb = RelativePositionalEmbedding(self.dim_head, heads, seq_len + mem_len)
+        seq_and_mem_len = seq_len + mem_len + cmem_len
+        self.rel_pos_emb = RelativePositionalEmbedding(self.dim_head, heads, seq_and_mem_len)
+        self.compress_mem_fn = ConvCompress(dim, cmem_ratio)
 
         self.to_q = nn.Linear(dim, dim, bias = False)
         self.to_kv = nn.Linear(dim, dim * 2, bias = False)
         self.to_out = nn.Linear(dim, dim)
 
-    def forward(self, x, mem = None, **kwargs):
+    def forward(self, x, mem = None, cmem = None, **kwargs):
         b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
+
         mem = default(mem, lambda: torch.empty(b, 0, e))
+        cmem = default(cmem, lambda: torch.empty(b, 0, e))
+
         mem_len = mem.shape[1]
+        cmem_len = cmem.shape[1]
 
         q = self.to_q(x)
 
-        kv_input = torch.cat((mem, x), dim=1)
+        kv_input = torch.cat((cmem, mem, x), dim=1)
+        kv_len = kv_input.shape[1]
         k, v = self.to_kv(kv_input).chunk(2, dim=-1)
 
         q, k, v = map(lambda x: x.reshape(b, -1, h, dim_h).transpose(1, 2), (q, k, v))
 
         dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
 
-        pos_attn = self.rel_pos_emb(q, mem_len)
+        pos_attn = self.rel_pos_emb(q, mem_len + cmem_len)
         dots = dots + pos_attn
 
-        mask = torch.ones(t, t + mem_len).triu_(diagonal = 1 + mem_len).bool()
+        mask = torch.ones(t, kv_len).triu_(diagonal = 1 + kv_len).bool()
         dots.masked_fill_(mask[None, None, ...], float('-inf'))
 
         attn = dots.softmax(dim=-1)
@@ -121,42 +146,56 @@ class SelfAttention(nn.Module):
         out = out.transpose(1, 2).reshape(b, t, -1)
 
         # calculate next memory - compressed memory calculations will be put here
-        mem_next = mem
-        if self.seq_len == t:
-            mem_next = torch.cat((mem, x), dim=1)[:, -self.mem_len:, :].detach()
+        new_mem = mem
+        new_cmem = cmem
 
-        return SelfAttentionOutput(out = self.to_out(out), mem = mem_next)
+        if self.seq_len == t:
+            old_mem, new_mem = split_at_index(1, -self.mem_len, torch.cat((mem, x), dim=1))
+            old_mem_padding = old_mem.shape[1] % self.cmem_ratio
+
+            if old_mem_padding != 0:
+                old_mem = F.pad(old_mem, (0, 0, old_mem_padding, 0), value = 0.)
+
+            if old_mem.shape[1] != 0:
+                compressed_mem = self.compress_mem_fn(old_mem)
+                old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
+
+        return SelfAttentionOutput(out = self.to_out(out), mem = new_mem, cmem = new_cmem)
 
 # transformer
 
-TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem'])
+TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem', 'cmem'])
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, heads = 8):
+    def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8):
         super().__init__()
         mem_len = default(mem_len, seq_len)
-        self.mem_len = mem_len
-        self.seq_len = seq_len
+        cmem_len = default(cmem_len, mem_len // cmem_ratio)
+
         self.depth = depth
         self.token_emb = nn.Embedding(num_tokens, dim)
         self.to_logits = nn.Linear(dim, num_tokens)
 
-        self.attn_layers = nn.ModuleList([Residual(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, heads))) for _ in range(depth)])
+        self.attn_layers = nn.ModuleList([Residual(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([Residual(PreNorm(dim, FeedForward(dim))) for _ in range(depth)])
 
-    def forward(self, x, mem = None):
+    def forward(self, x, mem = None, cmem = None):
         x = self.token_emb(x)
         b, t, d = x.shape
 
         mem = default(mem, lambda: torch.empty(self.depth, b, 0, d))
+        cmem = default(cmem, lambda: torch.empty(self.depth, b, 0, d))
 
         next_mem = []
-        for attn, ff, m in zip(self.attn_layers, self.ff_layers, mem):
-            x, mem_out = attn(x, mem = m)
+        next_cmem = []
+        for attn, ff, m, c in zip(self.attn_layers, self.ff_layers, mem, cmem):
+            x, mem_out, cmem_out = attn(x, mem = m, cmem = c)
             x, = ff(x)
             next_mem.append(mem_out)
+            next_cmem.append(cmem_out)
 
         out = self.to_logits(x)
         next_mem = torch.stack(next_mem)
+        next_cmem = torch.stack(next_cmem)
 
-        return TransformerOutput(out = out, mem = next_mem)
+        return TransformerOutput(out = out, mem = next_mem, cmem = next_cmem)
