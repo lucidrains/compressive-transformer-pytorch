@@ -94,7 +94,13 @@ class FeedForward(nn.Module):
 
 # attention.
 
-SelfAttentionOutput = namedtuple('SelfAttentionOutput', ['out', 'mem', 'cmem'])
+SelfAttentionOutput = namedtuple('SelfAttentionOutput', ['out', 'mem', 'cmem', 'aux_loss'])
+
+# full attention for compressed memory auxiliary loss
+def full_attn(q, k, v):
+    dots = torch.einsum('bhid,bhjd->bhij', q, k)
+    attn = dots.softmax(dim=-1)
+    return torch.einsum('bhij,bhjd->bhid', attn, v)
 
 class SelfAttention(nn.Module):
     def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8):
@@ -130,7 +136,8 @@ class SelfAttention(nn.Module):
         kv_len = kv_input.shape[1]
         k, v = self.to_kv(kv_input).chunk(2, dim=-1)
 
-        q, k, v = map(lambda x: x.reshape(b, -1, h, dim_h).transpose(1, 2), (q, k, v))
+        merge_heads = lambda x: x.reshape(b, -1, h, dim_h).transpose(1, 2)
+        q, k, v = map(merge_heads, (q, k, v))
 
         dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
 
@@ -148,6 +155,7 @@ class SelfAttention(nn.Module):
         # calculate next memory - compressed memory calculations will be put here
         new_mem = mem
         new_cmem = cmem
+        aux_loss = torch.zeros(1, requires_grad = True, **to(q))
 
         if self.seq_len == t:
             old_mem, new_mem = split_at_index(1, -self.mem_len, torch.cat((mem, x), dim=1))
@@ -160,11 +168,21 @@ class SelfAttention(nn.Module):
                 compressed_mem = self.compress_mem_fn(old_mem)
                 old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
 
-        return SelfAttentionOutput(out = self.to_out(out), mem = new_mem.detach(), cmem = new_cmem.detach())
+                cmem_k, cmem_v = self.to_kv(compressed_mem).chunk(2, dim=-1)
+                cmem_k, cmem_v = map(merge_heads, (cmem_k, cmem_v))
+
+                old_mem_range = slice(- min(mem_len, self.mem_len) - self.seq_len, -self.seq_len)
+                old_mem_k, old_mem_v = k[:, :, old_mem_range].clone(), v[:, :, old_mem_range].clone()
+
+                old_mem_attn_output = full_attn(q.detach(), old_mem_k.detach(), old_mem_v.detach())
+                compressed_mem_attn_output = full_attn(q.detach(), cmem_k.detach(), cmem_v.detach())
+                aux_loss = F.mse_loss(old_mem_attn_output, compressed_mem_attn_output)
+
+        return SelfAttentionOutput(out = self.to_out(out), mem = new_mem.detach(), cmem = new_cmem.detach(), aux_loss = aux_loss)
 
 # transformer
 
-TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem', 'cmem'])
+TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem', 'cmem', 'aux_loss'])
 
 class CompressiveTransformer(nn.Module):
     def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8):
@@ -188,8 +206,10 @@ class CompressiveTransformer(nn.Module):
 
         next_mem = []
         next_cmem = []
+        aux_loss = torch.zeros(1, requires_grad = True, **to(x))
+
         for attn, ff, m, c in zip(self.attn_layers, self.ff_layers, mem, cmem):
-            x, mem_out, cmem_out = attn(x, mem = m, cmem = c)
+            x, mem_out, cmem_out, aux_loss = attn(x, mem = m, cmem = c)
             x, = ff(x)
             next_mem.append(mem_out)
             next_cmem.append(cmem_out)
@@ -198,4 +218,4 @@ class CompressiveTransformer(nn.Module):
         next_mem = torch.stack(next_mem)
         next_cmem = torch.stack(next_cmem)
 
-        return TransformerOutput(out = out, mem = next_mem, cmem = next_cmem)
+        return TransformerOutput(out = out, mem = next_mem, cmem = next_cmem, aux_loss = aux_loss)
