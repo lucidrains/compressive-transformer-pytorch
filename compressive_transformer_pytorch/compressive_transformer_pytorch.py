@@ -174,9 +174,12 @@ class SelfAttention(nn.Module):
                 old_mem_range = slice(- min(mem_len, self.mem_len) - self.seq_len, -self.seq_len)
                 old_mem_k, old_mem_v = k[:, :, old_mem_range].clone(), v[:, :, old_mem_range].clone()
 
-                old_mem_attn_output = full_attn(q.detach(), old_mem_k.detach(), old_mem_v.detach())
-                compressed_mem_attn_output = full_attn(q.detach(), cmem_k.detach(), cmem_v.detach())
-                aux_loss = F.mse_loss(old_mem_attn_output, compressed_mem_attn_output)
+                q, old_mem_k, old_mem_v, cmem_k, cmem_v = map(lambda x: x.detach(), (q, old_mem_k, old_mem_v, cmem_k, cmem_v))
+
+                aux_loss = F.mse_loss(
+                    full_attn(q, old_mem_k, old_mem_v),
+                    full_attn(q, cmem_k, cmem_v)
+                )
 
         return SelfAttentionOutput(out = self.to_out(out), mem = new_mem.detach(), cmem = new_cmem.detach(), aux_loss = aux_loss)
 
