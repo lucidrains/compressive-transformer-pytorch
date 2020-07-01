@@ -135,6 +135,11 @@ class CompressiveTransformer(nn.Module):
 
         out = self.to_logits(x)
 
-        hidden_states = torch.stack(hidden_states)
-        new_mem = torch.cat((mem, hidden_states), dim=2)[:, :, -self.mem_len:, :].detach()
+        # calculate new memory only if sequence length buffer is full
+        if self.seq_len == t:
+            hidden_states = torch.stack(hidden_states)
+            new_mem = torch.cat((mem, hidden_states), dim=2)[:, :, -self.mem_len:, :].detach()
+        else:
+            new_mem = mem
+
         return out, new_mem
