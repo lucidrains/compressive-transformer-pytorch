@@ -160,7 +160,7 @@ class SelfAttention(nn.Module):
                 compressed_mem = self.compress_mem_fn(old_mem)
                 old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
 
-        return SelfAttentionOutput(out = self.to_out(out), mem = new_mem, cmem = new_cmem)
+        return SelfAttentionOutput(out = self.to_out(out), mem = new_mem.detach(), cmem = new_cmem.detach())
 
 # transformer
 
