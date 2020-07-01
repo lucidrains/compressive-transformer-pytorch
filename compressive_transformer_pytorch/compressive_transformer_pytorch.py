@@ -4,6 +4,9 @@ import torch.nn.functional as F
 
 # helper functions
 
+def to(t):
+    return {'dtype': t.dtype, 'device': t.device}
+
 def default(x, val):
     return val if x is None else x
 
@@ -43,8 +46,10 @@ class RelativePositionalEmbedding(nn.Module):
         self.scale = dim ** -0.5
         self.weights = nn.Parameter(torch.zeros(length, heads, dim))
 
-    def forward(self, q):
-        emb = torch.einsum('bhid,jhd->bhij', q, self.weights.type(q.dtype)) * self.scale
+    def forward(self, q, mem_len = 0):
+        seq_len = q.shape[2] + mem_len
+        weights = self.weights[:seq_len].type(q.dtype)
+        emb = torch.einsum('bhid,jhd->bhij', q, weights) * self.scale
         return shift(emb)
 
 # feedforward
@@ -63,11 +68,14 @@ class FeedForward(nn.Module):
 # attention.
 
 class SelfAttention(nn.Module):
-    def __init__(self, dim, heads = 8):
+    def __init__(self, dim, seq_len, mem_len, heads = 8):
         super().__init__()
         self.heads = heads
         self.dim_head = dim // heads
         self.scale = self.dim_head ** (-0.5)
+
+        self.rel_pos_emb = RelativePositionalEmbedding(self.dim_head, heads, seq_len + mem_len)
+
         self.to_q = nn.Linear(dim, dim, bias = False)
         self.to_kv = nn.Linear(dim, dim * 2, bias = False)
         self.to_out = nn.Linear(dim, dim)
@@ -85,6 +93,10 @@ class SelfAttention(nn.Module):
         q, k, v = map(lambda x: x.reshape(b, -1, h, dim_h).transpose(1, 2), (q, k, v))
 
         dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
+
+        pos_attn = self.rel_pos_emb(q, mem_len)
+        dots = dots + pos_attn
+
         mask = torch.ones(t, t + mem_len).triu_(diagonal = 1 + mem_len).bool()
         dots.masked_fill_(mask[None, None, ...], float('-inf'))
 
@@ -99,14 +111,14 @@ class SelfAttention(nn.Module):
 class CompressiveTransformer(nn.Module):
     def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, heads = 8):
         super().__init__()
-        self.mem_len = default(mem_len, seq_len)
+        mem_len = default(mem_len, seq_len)
+        self.mem_len = mem_len
         self.seq_len = seq_len
         self.depth = depth
         self.token_emb = nn.Embedding(num_tokens, dim)
-        self.pos_emb = RelativePositionalEmbedding
         self.to_logits = nn.Linear(dim, num_tokens)
 
-        self.attn_layers = nn.ModuleList([Residual(PreNorm(dim, SelfAttention(dim, heads))) for _ in range(depth)])
+        self.attn_layers = nn.ModuleList([Residual(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, heads))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([Residual(PreNorm(dim, FeedForward(dim))) for _ in range(depth)])
 
     def forward(self, x, mem = None):
