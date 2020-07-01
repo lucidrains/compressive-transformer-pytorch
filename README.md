@@ -11,6 +11,7 @@ $ pip install compressive_transformer_pytorch
 ## Usage
 
 ```python
+import torch
 from compressive_transformer_pytorch import CompressiveTransformer
 
 model = CompressiveTransformer(
@@ -24,8 +25,12 @@ model = CompressiveTransformer(
     gru_gated_residual = True     # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
 )
 
-input = torch.randint(0, 256, (1, 1024))
-logits, mem, cmem, aux_loss = model(input)
+inputs = torch.randint(0, 256, (1, 2048))
+
+segments = inputs.reshape(1, -1, 1024).transpose(0, 1)
+
+logits, mem, cmem, aux_loss = model(segments[0])
+logits, _, _, aux_loss      = model(segments[1], mem = mem, cmem = cmem)
 ```
 
 ## Citations
