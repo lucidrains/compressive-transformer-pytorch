@@ -99,20 +99,6 @@ class ConvCompress(nn.Module):
         compressed_mem = self.conv(mem)
         return compressed_mem.transpose(1, 2)
 
-# rel positional embedding
-
-class RelativePositionalEmbedding(nn.Module):
-    def __init__(self, dim, heads, length):
-        super().__init__()
-        self.scale = dim ** -0.5
-        self.weights = nn.Parameter(torch.zeros(length, heads, dim))
-
-    def forward(self, q, mem_len):
-        seq_len = q.shape[2] + mem_len
-        weights = self.weights[:seq_len].type(q.dtype)
-        emb = torch.einsum('bhid,jhd->bhij', q, weights) * self.scale
-        return shift(emb)
-
 # feedforward
 
 class FeedForward(nn.Module):
@@ -139,15 +125,13 @@ class SelfAttention(nn.Module):
         self.cmem_ratio = cmem_ratio
         self.scale = self.dim_head ** (-0.5)
 
-        seq_and_mem_len = seq_len + mem_len + cmem_len
-        self.rel_pos_emb = RelativePositionalEmbedding(self.dim_head, heads, seq_and_mem_len)
         self.compress_mem_fn = ConvCompress(dim, cmem_ratio)
 
         self.to_q = nn.Linear(dim, dim, bias = False)
         self.to_kv = nn.Linear(dim, dim * 2, bias = False)
         self.to_out = nn.Linear(dim, dim)
 
-    def forward(self, x, mem = None, cmem = None, **kwargs):
+    def forward(self, x, mem = None, cmem = None, pos_emb = None, **kwargs):
         b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
 
         mem = default(mem, lambda: torch.empty(b, 0, e))
@@ -167,8 +151,10 @@ class SelfAttention(nn.Module):
 
         dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
 
-        pos_attn = self.rel_pos_emb(q, mem_len + cmem_len)
-        dots = dots + pos_attn
+        if pos_emb is not None:
+            pos_dots = torch.einsum('bhid,hjd->bhij', q, pos_emb) * self.scale
+            pos_dots = shift(pos_dots)
+            dots = dots + pos_dots
 
         mask = torch.ones(t, kv_len).triu_(diagonal = 1 + kv_len).bool()
         dots.masked_fill_(mask[None, None, ...], float('-inf'))
@@ -216,9 +202,13 @@ class CompressiveTransformer(nn.Module):
         super().__init__()
         mem_len = default(mem_len, seq_len)
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
+        self.seq_len = seq_len
 
         self.depth = depth
         self.token_emb = nn.Embedding(num_tokens, dim)
+
+        seq_and_mem_len = seq_len + mem_len + cmem_len
+        self.pos_emb = nn.Parameter(torch.zeros(heads, seq_and_mem_len, dim // heads))
         self.to_logits = nn.Linear(dim, num_tokens)
 
         wrapper = partial(GRUGating, dim) if gru_gated_residual else Residual
@@ -233,12 +223,15 @@ class CompressiveTransformer(nn.Module):
         mem = default(mem, lambda: torch.empty(self.depth, b, 0, d))
         cmem = default(cmem, lambda: torch.empty(self.depth, b, 0, d))
 
+        total_len = mem.shape[2] + cmem.shape[2]
+        pos_emb = self.pos_emb[:, (self.seq_len - t):(t + total_len)]
+
         next_mem = []
         next_cmem = []
         aux_loss = torch.zeros(1, requires_grad = True, **to(x))
 
         for attn, ff, m, c in zip(self.attn_layers, self.ff_layers, mem, cmem):
-            x, mem_out, cmem_out, aux_loss = attn(x, mem = m, cmem = c)
+            x, mem_out, cmem_out, aux_loss = attn(x, mem = m, cmem = c, pos_emb = pos_emb)
             x, = ff(x)
             next_mem.append(mem_out)
             next_cmem.append(cmem_out)
