@@ -1,5 +1,6 @@
 from collections import namedtuple
 
+from functools import partial
 from inspect import isfunction
 import torch
 from torch import nn
@@ -44,6 +45,27 @@ class Residual(nn.Module):
         out = self.fn(x, **kwargs)
         out = cast_tuple(out)
         ret = (out[0] + x), *out[1:]
+        return ret
+
+class GRUGating(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.dim = dim
+        self.fn = fn
+        self.gru = nn.GRU(dim, dim)
+
+    def forward(self, x, **kwargs):
+        batch, dim = x.shape[0], self.dim
+        out = self.fn(x, **kwargs)
+        y, *rest = cast_tuple(out)
+
+        gated_output, _ = self.gru(
+            y.reshape(1, -1, dim),
+            x.reshape(1, -1, dim)
+        )
+
+        gated_output = gated_output.reshape(batch, -1, dim)
+        ret = gated_output, *rest
         return ret
 
 class PreNorm(nn.Module):
@@ -188,7 +210,7 @@ class SelfAttention(nn.Module):
 TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem', 'cmem', 'aux_loss'])
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8):
+    def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True):
         super().__init__()
         mem_len = default(mem_len, seq_len)
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
@@ -197,8 +219,10 @@ class CompressiveTransformer(nn.Module):
         self.token_emb = nn.Embedding(num_tokens, dim)
         self.to_logits = nn.Linear(dim, num_tokens)
 
-        self.attn_layers = nn.ModuleList([Residual(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads))) for _ in range(depth)])
-        self.ff_layers = nn.ModuleList([Residual(PreNorm(dim, FeedForward(dim))) for _ in range(depth)])
+        wrapper = partial(GRUGating, dim) if gru_gated_residual else Residual
+
+        self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads))) for _ in range(depth)])
+        self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim))) for _ in range(depth)])
 
     def forward(self, x, mem = None, cmem = None):
         x = self.token_emb(x)
