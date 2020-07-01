@@ -1,5 +1,6 @@
 from collections import namedtuple
 
+from inspect import isfunction
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -13,7 +14,9 @@ def cast_tuple(el):
     return el if isinstance(el, tuple) else tuple(el)
 
 def default(x, val):
-    return val if x is None else x
+    if x is not None:
+        return x
+    return val if not isfunction(val) else val()
 
 def shift(x):
     *_, i, j = x.shape
@@ -94,7 +97,7 @@ class SelfAttention(nn.Module):
 
     def forward(self, x, mem = None, **kwargs):
         b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
-        mem = default(mem, torch.empty(b, 0, e))
+        mem = default(mem, lambda: torch.empty(b, 0, e))
         mem_len = mem.shape[1]
 
         q = self.to_q(x)
@@ -145,7 +148,7 @@ class CompressiveTransformer(nn.Module):
         x = self.token_emb(x)
         b, t, d = x.shape
 
-        mem = default(mem, torch.empty(self.depth, b, 0, d))
+        mem = default(mem, lambda: torch.empty(self.depth, b, 0, d))
 
         next_mem = []
         for attn, ff, m in zip(self.attn_layers, self.ff_layers, mem):
