@@ -1,3 +1,5 @@
+from collections import namedtuple
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -6,6 +8,9 @@ import torch.nn.functional as F
 
 def to(t):
     return {'dtype': t.dtype, 'device': t.device}
+
+def cast_tuple(el):
+    return el if isinstance(el, tuple) else tuple(el)
 
 def default(x, val):
     return val if x is None else x
@@ -27,7 +32,10 @@ class Residual(nn.Module):
         super().__init__()
         self.fn = fn
     def forward(self, x, **kwargs):
-        return self.fn(x, **kwargs) + x
+        out = self.fn(x, **kwargs)
+        out = cast_tuple(out)
+        ret = (out[0] + x), *out[1:]
+        return ret
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -67,11 +75,15 @@ class FeedForward(nn.Module):
 
 # attention.
 
+SelfAttentionOutput = namedtuple('SelfAttentionOutput', ['out', 'mem'])
+
 class SelfAttention(nn.Module):
     def __init__(self, dim, seq_len, mem_len, heads = 8):
         super().__init__()
         self.heads = heads
         self.dim_head = dim // heads
+        self.seq_len = seq_len
+        self.mem_len = mem_len
         self.scale = self.dim_head ** (-0.5)
 
         self.rel_pos_emb = RelativePositionalEmbedding(self.dim_head, heads, seq_len + mem_len)
@@ -104,9 +116,17 @@ class SelfAttention(nn.Module):
 
         out = torch.einsum('bhij,bhjd->bhid', attn, v)
         out = out.transpose(1, 2).reshape(b, t, -1)
-        return self.to_out(out)
+
+        # calculate next memory - compressed memory calculations will be put here
+        mem_next = mem
+        if self.seq_len == t:
+            mem_next = torch.cat((mem, x), dim=1)[:, -self.mem_len:, :].detach()
+
+        return SelfAttentionOutput(out = self.to_out(out), mem = mem_next)
 
 # transformer
+
+TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem'])
 
 class CompressiveTransformer(nn.Module):
     def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, heads = 8):
@@ -126,20 +146,14 @@ class CompressiveTransformer(nn.Module):
         b, t, d = x.shape
 
         mem = default(mem, torch.empty(self.depth, b, 0, d))
-        hidden_states = []
 
+        next_mem = []
         for attn, ff, m in zip(self.attn_layers, self.ff_layers, mem):
-            hidden_states.append(x)
-            x = attn(x, mem = m)
-            x = ff(x)
+            x, mem_out = attn(x, mem = m)
+            x, = ff(x)
+            next_mem.append(mem_out)
 
         out = self.to_logits(x)
+        next_mem = torch.stack(next_mem)
 
-        # calculate new memory only if sequence length buffer is full
-        if self.seq_len == t:
-            hidden_states = torch.stack(hidden_states)
-            new_mem = torch.cat((mem, hidden_states), dim=2)[:, :, -self.mem_len:, :].detach()
-        else:
-            new_mem = mem
-
-        return out, new_mem
+        return TransformerOutput(out = out, mem = next_mem)
