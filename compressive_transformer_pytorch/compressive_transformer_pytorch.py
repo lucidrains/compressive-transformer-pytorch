@@ -163,23 +163,30 @@ class SelfAttention(nn.Module):
 
         out = torch.einsum('bhij,bhjd->bhid', attn, v)
         out = out.transpose(1, 2).reshape(b, t, -1)
+        logits = self.to_out(out)
 
-        # calculate next memory - compressed memory calculations will be put here
         new_mem = mem
         new_cmem = cmem
         aux_loss = torch.zeros(1, requires_grad = True, **to(q))
 
-        if self.seq_len == t:
-            old_mem, new_mem = split_at_index(1, -self.mem_len, torch.cat((mem, x), dim=1))
-            old_mem_padding = old_mem.shape[1] % self.cmem_ratio
+        if self.seq_len < t:
+            return SelfAttentionOutput(out = logits, mem = new_mem, cmem = new_cmem, aux_loss = aux_loss)
 
-            if old_mem_padding != 0:
-                old_mem = F.pad(old_mem, (0, 0, old_mem_padding, 0), value = 0.)
+        # calculate memory and compressed memory
 
-            if old_mem.shape[1] != 0:
-                compressed_mem = self.compress_mem_fn(old_mem)
-                old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
+        old_mem, new_mem = split_at_index(1, -self.mem_len, torch.cat((mem, x), dim=1))
+        old_mem_padding = old_mem.shape[1] % self.cmem_ratio
 
+        if old_mem_padding != 0:
+            old_mem = F.pad(old_mem, (0, 0, old_mem_padding, 0), value = 0.)
+
+        if old_mem.shape[1] != 0:
+            compressed_mem = self.compress_mem_fn(old_mem)
+            old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
+
+            # calculate auxiliary loss if training
+
+            if self.training:
                 cmem_k, cmem_v = self.to_kv(compressed_mem).chunk(2, dim=-1)
                 cmem_k, cmem_v = map(merge_heads, (cmem_k, cmem_v))
 
@@ -193,7 +200,7 @@ class SelfAttention(nn.Module):
                     full_attn(q, cmem_k, cmem_v)
                 )
 
-        return SelfAttentionOutput(out = self.to_out(out), mem = new_mem.detach(), cmem = new_cmem.detach(), aux_loss = aux_loss)
+        return SelfAttentionOutput(out = logits, mem = new_mem, cmem = new_cmem, aux_loss = aux_loss)
 
 # transformer
 
@@ -239,4 +246,5 @@ class CompressiveTransformer(nn.Module):
         out = self.to_logits(x)
 
         next_mem, next_cmem = map(torch.stack, (next_mem, next_cmem))
+        next_mem, next_cmem = map(lambda x: x.detach(), (next_mem, next_cmem))
         return TransformerOutput(out = out, mem = next_mem, cmem = next_cmem, aux_loss = aux_loss)
