@@ -2,6 +2,32 @@
 
 Pytorch implementation of <a href="https://openreview.net/forum?id=SylKikSYDH">Compressive Transformers</a>, a variant of Transformer-XL with compressed memory for long-range language modelling. I will also combine this with an idea from <a href="https://arxiv.org/abs/1910.06764">another paper</a> that adds gating at the residual intersection. The memory and the gating may be synergistic, and lead to further improvements in both language modeling as well as reinforcement learning.
 
+## Install
+
+```bash
+$ pip install compressive_transformer_pytorch
+```
+
+## Usage
+
+```python
+from compressive_transformer_pytorch import CompressiveTransformer
+
+model = CompressiveTransformer(
+    num_tokens = 20000,
+    dim = 512,
+    depth = 6,
+    seq_len = 1024,
+    mem_len = 1024,               # memory length
+    cmem_len = 1024 // 4,         # compressed memory buffer length
+    cmem_ratio = 4,               # compressed memory ratio, 4 was recommended in paper
+    gru_gated_residual = True     # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
+)
+
+input = torch.randint(0, 256, (1, 1024))
+logits, mem, cmem, aux_loss = model(input)
+```
+
 ## Citations
 
 ```bibtex
