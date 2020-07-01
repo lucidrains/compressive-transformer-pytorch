@@ -6,6 +6,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+# structs
+
+SelfAttentionOutput = namedtuple('SelfAttentionOutput', ['out', 'mem', 'cmem', 'aux_loss'])
+
+TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem', 'cmem', 'aux_loss'])
+
 # helper functions
 
 def to(t):
@@ -34,6 +40,12 @@ def shift(x):
     zero_pad = torch.zeros(*_, -x.size(-1) % l, **to(x))
     shifted = torch.cat([x, zero_pad], -1).view(*_, -1, l)
     return shifted[..., :i, i - 1:]
+
+# full attention for calculating auxiliary reconstruction loss
+def full_attn(q, k, v):
+    dots = torch.einsum('bhid,bhjd->bhij', q, k)
+    attn = dots.softmax(dim=-1)
+    return torch.einsum('bhij,bhjd->bhid', attn, v)
 
 # helper classes
 
@@ -115,14 +127,6 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 # attention.
-
-SelfAttentionOutput = namedtuple('SelfAttentionOutput', ['out', 'mem', 'cmem', 'aux_loss'])
-
-# full attention for compressed memory auxiliary loss
-def full_attn(q, k, v):
-    dots = torch.einsum('bhid,bhjd->bhij', q, k)
-    attn = dots.softmax(dim=-1)
-    return torch.einsum('bhij,bhjd->bhid', attn, v)
 
 class SelfAttention(nn.Module):
     def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8):
@@ -207,8 +211,6 @@ class SelfAttention(nn.Module):
 
 # transformer
 
-TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem', 'cmem', 'aux_loss'])
-
 class CompressiveTransformer(nn.Module):
     def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True):
         super().__init__()
@@ -242,7 +244,6 @@ class CompressiveTransformer(nn.Module):
             next_cmem.append(cmem_out)
 
         out = self.to_logits(x)
-        next_mem = torch.stack(next_mem)
-        next_cmem = torch.stack(next_cmem)
 
+        next_mem, next_cmem = map(torch.stack, (next_mem, next_cmem))
         return TransformerOutput(out = out, mem = next_mem, cmem = next_cmem, aux_loss = aux_loss)
