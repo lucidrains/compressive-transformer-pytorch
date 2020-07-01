@@ -198,7 +198,7 @@ class SelfAttention(nn.Module):
                 cmem_k, cmem_v = map(merge_heads, (cmem_k, cmem_v))
 
                 old_mem_range = slice(- min(mem_len, self.mem_len) - self.seq_len, -self.seq_len)
-                old_mem_k, old_mem_v = k[:, :, old_mem_range].clone(), v[:, :, old_mem_range].clone()
+                old_mem_k, old_mem_v = map(lambda x: x[:, :, old_mem_range].clone(), (k, v))
 
                 q, old_mem_k, old_mem_v, cmem_k, cmem_v = map(lambda x: x.detach(), (q, old_mem_k, old_mem_v, cmem_k, cmem_v))
 
