@@ -31,6 +31,8 @@ segments = inputs.reshape(1, -1, 1024).transpose(0, 1)
 
 logits, memories, aux_loss = model(segments[0])
 logits,        _, aux_loss = model(segments[1], memories = memories)
+
+# memories is a named tuple that contains the memory (mem) and the compressed memory (cmem)
 ```
 
 ## Citations
