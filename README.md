@@ -74,3 +74,14 @@ logits,        _, aux_loss = model(segments[1], mask = masks[1], memories = memo
     url = "https://www.aclweb.org/anthology/2020.acl-main.672"
 }
 ```
+
+```bibtex
+@misc{fan2020accessing,
+    title={Accessing Higher-level Representations in Sequential Transformers with Feedback Memory},
+    author={Angela Fan and Thibaut Lavril and Edouard Grave and Armand Joulin and Sainbayar Sukhbaatar},
+    year={2020},
+    eprint={2002.09402},
+    archivePrefix={arXiv},
+    primaryClass={cs.LG}
+}
+```
