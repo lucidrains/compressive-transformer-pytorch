@@ -250,7 +250,7 @@ class CompressiveTransformer(nn.Module):
         self.seq_len = seq_len
 
         self.depth = depth
-        self.memory_layers = memory_layers
+        self.memory_layers = list(memory_layers)
 
         self.token_emb = nn.Embedding(num_tokens, dim)
 

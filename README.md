@@ -17,7 +17,7 @@ from compressive_transformer_pytorch import CompressiveTransformer
 model = CompressiveTransformer(
     num_tokens = 20000,
     dim = 512,
-    depth = 6,
+    depth = 12,
     seq_len = 1024,
     mem_len = 1024,               # memory length
     cmem_len = 1024 // 4,         # compressed memory buffer length
@@ -26,7 +26,7 @@ model = CompressiveTransformer(
     ff_dropout = 0.1,             # dropout in feedforward
     attn_layer_dropout = 0.1,     # dropout for attention layer output
     gru_gated_residual = True,    # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
-    memory_layers = [4, 5, 6]     # specify which layers to use long-range memory, from 'Do Transformers Need LR Memory' paper
+    memory_layers = range(6, 13)  # specify which layers to use long-range memory, from 'Do Transformers Need LR Memory' paper
 )
 
 inputs = torch.randint(0, 256, (1, 2048))
