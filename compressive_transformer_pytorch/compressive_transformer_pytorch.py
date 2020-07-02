@@ -238,10 +238,11 @@ class CompressiveTransformer(nn.Module):
         aux_loss = torch.zeros(1, requires_grad = True, **to(x))
 
         for attn, ff, m, c in zip(self.attn_layers, self.ff_layers, mem, cmem):
-            x, mem_out, cmem_out, aux_loss = attn(x, mem = m, cmem = c, pos_emb = pos_emb)
+            x, mem_out, cmem_out, layer_aux_loss = attn(x, mem = m, cmem = c, pos_emb = pos_emb)
             x, = ff(x)
             next_mem.append(mem_out)
             next_cmem.append(cmem_out)
+            aux_loss = aux_loss + layer_aux_loss
 
         out = self.to_logits(x)
 
