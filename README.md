@@ -22,6 +22,9 @@ model = CompressiveTransformer(
     mem_len = 1024,               # memory length
     cmem_len = 1024 // 4,         # compressed memory buffer length
     cmem_ratio = 4,               # compressed memory ratio, 4 was recommended in paper
+    attn_dropout = 0.1,           # dropout post-attention
+    ff_dropout = 0.1,             # dropout in feedforward
+    attn_layer_dropout = 0.1,     # dropout for attention layer output
     gru_gated_residual = True     # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
 )
 

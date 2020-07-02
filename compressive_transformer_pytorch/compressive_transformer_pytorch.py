@@ -200,7 +200,7 @@ class SelfAttention(nn.Module):
         aux_loss = torch.zeros(1, requires_grad = True, **to(q))
 
         if self.seq_len < t:
-            return SelfAttentionOutput(out = logits, mem = new_mem, cmem = new_cmem, aux_loss = aux_loss)
+            return logits, Memory(mem = new_mem, cmem = new_cmem), aux_loss
 
         # calculate memory and compressed memory
 
@@ -236,13 +236,17 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0.):
+    def __init__(self, num_tokens, dim, seq_len, depth, use_memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0.):
         super().__init__()
         mem_len = default(mem_len, seq_len)
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
+        use_memory_layers = default(use_memory_layers, list(range(1, depth + 1)))
+
         self.seq_len = seq_len
 
         self.depth = depth
+        self.use_memory_layers = use_memory_layers
+
         self.token_emb = nn.Embedding(num_tokens, dim)
 
         seq_and_mem_len = seq_len + mem_len + cmem_len
@@ -272,7 +276,10 @@ class CompressiveTransformer(nn.Module):
         next_cmem = []
         aux_loss = torch.zeros(1, requires_grad = True, **to(x))
 
-        for attn, ff, m, c in zip(self.attn_layers, self.ff_layers, mem, cmem):
+        for ind, (attn, ff, m, c) in enumerate(zip(self.attn_layers, self.ff_layers, mem, cmem)):
+            layer_num = ind + 1
+            use_memory = layer_num in self.use_memory_layers
+
             x, (mem_out, cmem_out), layer_aux_loss = attn(x, memories = (m, c), input_mask = mask, pos_emb = pos_emb)
             x, = ff(x)
 
