@@ -162,8 +162,8 @@ class SelfAttention(nn.Module):
         if memories is not None:
             mem, cmem = memories
 
-        mem = default(mem, lambda: torch.empty(b, 0, e))
-        cmem = default(cmem, lambda: torch.empty(b, 0, e))
+        mem = default(mem, lambda: torch.empty(b, 0, e, **to(x)))
+        cmem = default(cmem, lambda: torch.empty(b, 0, e, **to(x)))
 
         mem_len = mem.shape[1]
         cmem_len = cmem.shape[1]
@@ -189,7 +189,7 @@ class SelfAttention(nn.Module):
             mask = F.pad(mask, (mem_len + cmem_len, 0), value = False)
             dots.masked_fill_(~mask, float('-inf'))
 
-        mask = torch.ones(t, kv_len).triu_(diagonal = 1 + kv_len).bool()
+        mask = torch.ones(t, kv_len, **to(x)).triu_(diagonal = 1 + kv_len).bool()
         dots.masked_fill_(mask[None, None, ...], float('-inf'))
 
         attn = dots.softmax(dim=-1)
@@ -272,8 +272,8 @@ class CompressiveTransformer(nn.Module):
             mem, cmem = memories
 
         num_memory_layers = len(self.memory_layers)
-        mem = default(mem, lambda: torch.empty(num_memory_layers, b, 0, d))
-        cmem = default(cmem, lambda: torch.empty(num_memory_layers, b, 0, d))
+        mem = default(mem, lambda: torch.empty(num_memory_layers, b, 0, d, **to(x)))
+        cmem = default(cmem, lambda: torch.empty(num_memory_layers, b, 0, d, **to(x)))
 
         total_len = mem.shape[2] + cmem.shape[2] + t
         pos_emb = self.pos_emb[:, (self.seq_len - t):total_len]
