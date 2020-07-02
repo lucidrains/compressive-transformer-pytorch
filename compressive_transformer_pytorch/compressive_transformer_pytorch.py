@@ -39,6 +39,11 @@ def shift(x):
     shifted = torch.cat([x, zero_pad], -1).view(*_, -1, l)
     return shifted[..., :i, i - 1:]
 
+def iterate_tensor(t):
+    length = t.shape[0]
+    for ind in range(length):
+        yield t[ind]
+
 # full attention for calculating auxiliary reconstruction loss
 def full_attn(q, k, v):
     dots = torch.einsum('bhid,bhjd->bhij', q, k)
@@ -150,7 +155,7 @@ class SelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(attn_dropout)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, memories = None, pos_emb = None, input_mask = None, **kwargs):
+    def forward(self, x, memories = None, pos_emb = None, input_mask = None, calc_memory = True, **kwargs):
         b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
 
         mem = cmem = None
@@ -199,7 +204,7 @@ class SelfAttention(nn.Module):
         new_cmem = cmem
         aux_loss = torch.zeros(1, requires_grad = True, **to(q))
 
-        if self.seq_len < t:
+        if self.seq_len < t or not calc_memory:
             return logits, Memory(mem = new_mem, compressed_mem = new_cmem), aux_loss
 
         # calculate memory and compressed memory
@@ -236,16 +241,16 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, use_memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0.):
+    def __init__(self, num_tokens, dim, seq_len, depth, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0.):
         super().__init__()
         mem_len = default(mem_len, seq_len)
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
-        use_memory_layers = default(use_memory_layers, list(range(1, depth + 1)))
+        memory_layers = default(memory_layers, list(range(1, depth + 1)))
 
         self.seq_len = seq_len
 
         self.depth = depth
-        self.use_memory_layers = use_memory_layers
+        self.memory_layers = memory_layers
 
         self.token_emb = nn.Embedding(num_tokens, dim)
 
@@ -266,8 +271,9 @@ class CompressiveTransformer(nn.Module):
         if memories is not None:
             mem, cmem = memories
 
-        mem = default(mem, lambda: torch.empty(self.depth, b, 0, d))
-        cmem = default(cmem, lambda: torch.empty(self.depth, b, 0, d))
+        num_memory_layers = len(self.memory_layers)
+        mem = default(mem, lambda: torch.empty(num_memory_layers, b, 0, d))
+        cmem = default(cmem, lambda: torch.empty(num_memory_layers, b, 0, d))
 
         total_len = mem.shape[2] + cmem.shape[2] + t
         pos_emb = self.pos_emb[:, (self.seq_len - t):total_len]
@@ -276,15 +282,22 @@ class CompressiveTransformer(nn.Module):
         next_cmem = []
         aux_loss = torch.zeros(1, requires_grad = True, **to(x))
 
+        mem_iter = iterate_tensor(mem)
+        cmem_iter = iterate_tensor(cmem)
+
         for ind, (attn, ff, m, c) in enumerate(zip(self.attn_layers, self.ff_layers, mem, cmem)):
             layer_num = ind + 1
-            use_memory = layer_num in self.use_memory_layers
+            use_memory = layer_num in self.memory_layers
 
-            x, (mem_out, cmem_out), layer_aux_loss = attn(x, memories = (m, c), input_mask = mask, pos_emb = pos_emb)
+            memories = (next(mem_iter), next(cmem_iter)) if use_memory else None
+
+            x, (mem_out, cmem_out), layer_aux_loss = attn(x, memories = memories, calc_memory = use_memory, input_mask = mask, pos_emb = pos_emb)
             x, = ff(x)
 
-            next_mem.append(mem_out)
-            next_cmem.append(cmem_out)
+            if use_memory:
+                next_mem.append(mem_out)
+                next_cmem.append(cmem_out)
+
             aux_loss = aux_loss + layer_aux_loss
 
         out = self.to_logits(x)

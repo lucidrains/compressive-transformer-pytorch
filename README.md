@@ -25,7 +25,8 @@ model = CompressiveTransformer(
     attn_dropout = 0.1,           # dropout post-attention
     ff_dropout = 0.1,             # dropout in feedforward
     attn_layer_dropout = 0.1,     # dropout for attention layer output
-    gru_gated_residual = True     # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
+    gru_gated_residual = True,    # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
+    memory_layers = [4, 5, 6]     # specify which layers to use long-range memory, from 'Do Transformers Need LR Memory' paper
 )
 
 inputs = torch.randint(0, 256, (1, 2048))
