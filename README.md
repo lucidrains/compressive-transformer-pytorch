@@ -29,8 +29,8 @@ inputs = torch.randint(0, 256, (1, 2048))
 
 segments = inputs.reshape(1, -1, 1024).transpose(0, 1)
 
-logits, mem, cmem, aux_loss = model(segments[0])
-logits, _, _, aux_loss      = model(segments[1], mem = mem, cmem = cmem)
+logits, memories, aux_loss = model(segments[0])
+logits,        _, aux_loss = model(segments[1], memories = memories)
 ```
 
 ## Citations

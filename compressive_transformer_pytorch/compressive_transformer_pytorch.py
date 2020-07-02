@@ -8,9 +8,7 @@ import torch.nn.functional as F
 
 # structs
 
-SelfAttentionOutput = namedtuple('SelfAttentionOutput', ['out', 'mem', 'cmem', 'aux_loss'])
-
-TransformerOutput = namedtuple('TransformerOutput', ['out', 'mem', 'cmem', 'aux_loss'])
+Memory = namedtuple('Memory', ['mem', 'cmem'])
 
 # helper functions
 
@@ -131,8 +129,12 @@ class SelfAttention(nn.Module):
         self.to_kv = nn.Linear(dim, dim * 2, bias = False)
         self.to_out = nn.Linear(dim, dim)
 
-    def forward(self, x, mem = None, cmem = None, pos_emb = None, **kwargs):
+    def forward(self, x, memories = None, pos_emb = None, **kwargs):
         b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
+
+        mem = cmem = None
+        if memories is not None:
+            mem, cmem = memories
 
         mem = default(mem, lambda: torch.empty(b, 0, e))
         cmem = default(cmem, lambda: torch.empty(b, 0, e))
@@ -200,7 +202,7 @@ class SelfAttention(nn.Module):
                     full_attn(q, cmem_k, cmem_v)
                 )
 
-        return SelfAttentionOutput(out = logits, mem = new_mem, cmem = new_cmem, aux_loss = aux_loss)
+        return logits, Memory(mem = new_mem, cmem = new_cmem), aux_loss
 
 # transformer
 
@@ -223,9 +225,13 @@ class CompressiveTransformer(nn.Module):
         self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim))) for _ in range(depth)])
 
-    def forward(self, x, mem = None, cmem = None):
+    def forward(self, x, memories = None):
         x = self.token_emb(x)
         b, t, d = x.shape
+
+        mem = cmem = None
+        if memories is not None:
+            mem, cmem = memories
 
         mem = default(mem, lambda: torch.empty(self.depth, b, 0, d))
         cmem = default(cmem, lambda: torch.empty(self.depth, b, 0, d))
@@ -238,7 +244,7 @@ class CompressiveTransformer(nn.Module):
         aux_loss = torch.zeros(1, requires_grad = True, **to(x))
 
         for attn, ff, m, c in zip(self.attn_layers, self.ff_layers, mem, cmem):
-            x, mem_out, cmem_out, layer_aux_loss = attn(x, mem = m, cmem = c, pos_emb = pos_emb)
+            x, (mem_out, cmem_out), layer_aux_loss = attn(x, memories = (m, c), pos_emb = pos_emb)
             x, = ff(x)
             next_mem.append(mem_out)
             next_cmem.append(cmem_out)
@@ -248,4 +254,4 @@ class CompressiveTransformer(nn.Module):
 
         next_mem, next_cmem = map(torch.stack, (next_mem, next_cmem))
         next_mem, next_cmem = map(lambda x: x.detach(), (next_mem, next_cmem))
-        return TransformerOutput(out = out, mem = next_mem, cmem = next_cmem, aux_loss = aux_loss)
+        return out, Memory(mem = next_mem, cmem = next_cmem), aux_loss
