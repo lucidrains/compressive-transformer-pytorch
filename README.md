@@ -26,11 +26,13 @@ model = CompressiveTransformer(
 )
 
 inputs = torch.randint(0, 256, (1, 2048))
+masks = torch.ones_like(inputs).bool()
 
 segments = inputs.reshape(1, -1, 1024).transpose(0, 1)
+masks = masks.reshape(1, -1, 1024).transpose(0, 1)
 
-logits, memories, aux_loss = model(segments[0])
-logits,        _, aux_loss = model(segments[1], memories = memories)
+logits, memories, aux_loss = model(segments[0], mask = masks[0])
+logits,        _, aux_loss = model(segments[1], mask = masks[1], memories = memories)
 
 # memories is a named tuple that contains the memory (mem) and the compressed memory (cmem)
 ```

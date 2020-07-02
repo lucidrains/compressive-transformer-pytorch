@@ -150,7 +150,7 @@ class SelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(attn_dropout)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, memories = None, pos_emb = None, **kwargs):
+    def forward(self, x, memories = None, pos_emb = None, input_mask = None, **kwargs):
         b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
 
         mem = cmem = None
@@ -178,6 +178,11 @@ class SelfAttention(nn.Module):
             pos_dots = torch.einsum('bhid,hjd->bhij', q, pos_emb) * self.scale
             pos_dots = shift(pos_dots)
             dots = dots + pos_dots
+
+        if input_mask is not None:
+            mask = input_mask[:, None, :, None] * input_mask[:, None, None, :]
+            mask = F.pad(mask, (mem_len + cmem_len, 0), value = False)
+            dots.masked_fill_(~mask, float('-inf'))
 
         mask = torch.ones(t, kv_len).triu_(diagonal = 1 + kv_len).bool()
         dots.masked_fill_(mask[None, None, ...], float('-inf'))
@@ -249,7 +254,7 @@ class CompressiveTransformer(nn.Module):
         self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim, dropout = ff_dropout))) for _ in range(depth)])
 
-    def forward(self, x, memories = None):
+    def forward(self, x, memories = None, mask = None):
         x = self.token_emb(x)
         b, t, d = x.shape
 
@@ -260,15 +265,15 @@ class CompressiveTransformer(nn.Module):
         mem = default(mem, lambda: torch.empty(self.depth, b, 0, d))
         cmem = default(cmem, lambda: torch.empty(self.depth, b, 0, d))
 
-        total_len = mem.shape[2] + cmem.shape[2]
-        pos_emb = self.pos_emb[:, (self.seq_len - t):(t + total_len)]
+        total_len = mem.shape[2] + cmem.shape[2] + t
+        pos_emb = self.pos_emb[:, (self.seq_len - t):total_len]
 
         next_mem = []
         next_cmem = []
         aux_loss = torch.zeros(1, requires_grad = True, **to(x))
 
         for attn, ff, m, c in zip(self.attn_layers, self.ff_layers, mem, cmem):
-            x, (mem_out, cmem_out), layer_aux_loss = attn(x, memories = (m, c), pos_emb = pos_emb)
+            x, (mem_out, cmem_out), layer_aux_loss = attn(x, memories = (m, c), input_mask = mask, pos_emb = pos_emb)
             x, = ff(x)
 
             next_mem.append(mem_out)
