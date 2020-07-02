@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 # structs
 
-Memory = namedtuple('Memory', ['mem', 'cmem'])
+Memory = namedtuple('Memory', ['mem', 'compressed_mem'])
 
 # helper functions
 
@@ -200,7 +200,7 @@ class SelfAttention(nn.Module):
         aux_loss = torch.zeros(1, requires_grad = True, **to(q))
 
         if self.seq_len < t:
-            return logits, Memory(mem = new_mem, cmem = new_cmem), aux_loss
+            return logits, Memory(mem = new_mem, compressed_mem = new_cmem), aux_loss
 
         # calculate memory and compressed memory
 
@@ -231,7 +231,7 @@ class SelfAttention(nn.Module):
                 )
 
 
-        return logits, Memory(mem = new_mem, cmem = new_cmem), aux_loss
+        return logits, Memory(mem = new_mem, compressed_mem = new_cmem), aux_loss
 
 # transformer
 
@@ -291,4 +291,4 @@ class CompressiveTransformer(nn.Module):
 
         next_mem, next_cmem = map(torch.stack, (next_mem, next_cmem))
         next_mem, next_cmem = map(lambda x: x.detach(), (next_mem, next_cmem))
-        return out, Memory(mem = next_mem, cmem = next_cmem), aux_loss
+        return out, Memory(mem = next_mem, compressed_mem = next_cmem), aux_loss
