@@ -184,7 +184,7 @@ class SelfAttention(nn.Module):
         mask_value = max_neg_value(dots)
 
         if pos_emb is not None:
-            pos_emb = pos_emb[:, -kv_len:]
+            pos_emb = pos_emb[:, -kv_len:].type(q.dtype)
             pos_dots = torch.einsum('bhid,hjd->bhij', q, pos_emb) * self.scale
             pos_dots = shift(pos_dots)
             dots = dots + pos_dots
