@@ -98,21 +98,24 @@ class AutoregressiveWrapper(nn.Module):
         if isinstance(x, torch.Tensor):
             xi = x[:, :-1]
             xo = x[:, 1:]
-
-            # help auto-solve an area of confusion around input masks in auto-regressive
-            # if user supplies a mask that is only off by one from the source sequence, resolve it for them
-            mask = kwargs.pop('mask', None)
-            if mask is not None and mask.shape[1] == x.shape[1]:
-                mask = mask[:, :-1]
-                kwargs.update(mask = mask)
         else:
             xi = pad(list(map(lambda t: t[:-1], x)))
             xo = pad(list(map(lambda t: t[1:], x)))
 
-        (xi, xo) = map(lambda x: x.split(self.seq_len, dim=1), (xi, xo))
+        # help auto-solve an area of confusion around input masks in auto-regressive
+        # if user supplies a mask that is only off by one from the source sequence, resolve it for them
+        mask = kwargs.pop('mask', None)
+        if mask is not None and mask.shape[1] == x.shape[1]:
+            mask = mask[:, :-1]
+
+        segment_fn = lambda x: x.split(self.seq_len, dim=1)
+        (xi, xo) = map(segment_fn, (xi, xo))
+
+        num_segments = len(xi)
+        mask = segment_fn(mask) if mask is not None else ((None,) * num_segments)
 
         mem = None
-        for xi_seg, xo_seg in zip(xi, xo):
-            logits, mem, aux_loss = self.net(xi_seg, memories = mem, **kwargs)
+        for xi_seg, xo_seg, mask_seg in zip(xi, xo, mask):
+            logits, mem, aux_loss = self.net(xi_seg, mask = mask_seg, memories = mem, **kwargs)
             loss = F.cross_entropy(logits.transpose(1, 2), xo_seg, ignore_index = self.ignore_index)
             yield loss, aux_loss
