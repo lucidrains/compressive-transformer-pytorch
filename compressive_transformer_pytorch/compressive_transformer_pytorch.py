@@ -49,7 +49,8 @@ def iterate_tensor(t):
 
 # full attention for calculating auxiliary reconstruction loss
 def full_attn(q, k, v):
-    dots = torch.einsum('bhid,bhjd->bhij', q, k)
+    *_, dim = q.shape
+    dots = torch.einsum('bhid,bhjd->bhij', q, k) * (dim ** -0.5)
     attn = dots.softmax(dim=-1)
     return torch.einsum('bhij,bhjd->bhid', attn, v)
 
