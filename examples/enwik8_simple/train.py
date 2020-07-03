@@ -13,7 +13,8 @@ from torch.utils.data import DataLoader, Dataset
 # constants
 
 NUM_BATCHES = int(1e5)
-BATCH_SIZE = 4
+BATCH_SIZE = 16
+MAX_BATCH_SIZE = 4
 LEARNING_RATE = 1e-4
 VALIDATE_EVERY  = 100
 
@@ -87,20 +88,23 @@ optim = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
     model.train()
 
-    for mlm_loss, aux_loss in model(next(train_loader), return_loss = True):
+    grad_accum_every = BATCH_SIZE / MAX_BATCH_SIZE
+
+    for mlm_loss, aux_loss, is_last in model(next(train_loader), max_batch_size = MAX_BATCH_SIZE, return_loss = True):
         loss = mlm_loss + aux_loss
-        loss.backward()
+        (loss / grad_accum_every).backward()
 
         print(f'training loss: {mlm_loss.item():.4f} | aux_loss: {aux_loss.item():.4f}')
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-        optim.step()
-        optim.zero_grad()
+        if is_last:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+            optim.step()
+            optim.zero_grad()
 
     if i % VALIDATE_EVERY == 0:
         model.eval()
         with torch.no_grad():
-            for loss, aux_loss in model(next(val_loader), return_loss = True):
+            for loss, aux_loss, _ in model(next(val_loader), return_loss = True):
                 print(f'validation loss: {loss.item():.4f}')
 
     if i % GENERATE_EVERY == 0:
