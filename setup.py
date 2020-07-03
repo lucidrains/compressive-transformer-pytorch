@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-  name = 'compressive_transformer_pytorch',
+  name = 'compressive-transformer-pytorch',
   packages = find_packages(exclude=['examples']),
   version = '0.2.0',
   license='MIT',
