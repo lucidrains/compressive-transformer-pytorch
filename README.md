@@ -32,7 +32,8 @@ model = CompressiveTransformer(
     attn_layer_dropout = 0.1,      # dropout for attention layer output
     gru_gated_residual = True,     # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
     memory_layers = range(6, 13),  # specify which layers to use long-range memory, from 'Do Transformers Need LR Memory' paper
-    one_head_kv = True             # share one key/value head for all queries, from Shazeers 'One Write-Head is All You Need'
+    one_head_kv = True,            # share one key/value head for all queries, from Shazeers 'One Write-Head is All You Need'
+    ff_glu = True                  # use GLU variant for feedforward
 )
 
 inputs = torch.randint(0, 256, (1, 2048))
@@ -128,5 +129,14 @@ sample = model.generate(prime, 4096)
     journal = {ArXiv},
     year    = {2019},
     volume  = {abs/1911.02150}
+}
+```
+
+```bibtex
+@misc{shazeer2020glu,
+    title   = {GLU Variants Improve Transformer},
+    author  = {Noam Shazeer},
+    year    = {2020},
+    url     = {https://arxiv.org/abs/2002.05202}
 }
 ```

@@ -216,7 +216,7 @@ class SelfAttention(nn.Module):
         aux_loss = torch.zeros(1, requires_grad = True, **to(q))
 
         if self.seq_len < t or not calc_memory:
-            return logits, Memory(mem = new_mem, compressed_mem = new_cmem), aux_loss
+            return logits, Memory(new_mem, new_cmem), aux_loss
 
         # calculate memory and compressed memory
 
@@ -248,12 +248,12 @@ class SelfAttention(nn.Module):
                 )
 
 
-        return logits, Memory(mem = new_mem, compressed_mem = new_cmem), aux_loss
+        return logits, Memory(new_mem, new_cmem), aux_loss
 
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
+    def __init__(self, num_tokens, dim, seq_len, depth, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_glu = False, ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
         super().__init__()
         mem_len = default(mem_len, seq_len)
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
@@ -273,7 +273,7 @@ class CompressiveTransformer(nn.Module):
         wrapper = partial(GRUGating, dim) if gru_gated_residual else Residual
 
         self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout, one_kv_head = one_kv_head))) for _ in range(depth)])
-        self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim, dropout = ff_dropout))) for _ in range(depth)])
+        self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim, dropout = ff_dropout, glu = ff_glu))) for _ in range(depth)])
 
         self.reconstruction_loss_weight = reconstruction_loss_weight
 
