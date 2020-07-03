@@ -31,7 +31,8 @@ model = CompressiveTransformer(
     ff_dropout = 0.1,              # dropout in feedforward
     attn_layer_dropout = 0.1,      # dropout for attention layer output
     gru_gated_residual = True,     # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
-    memory_layers = range(6, 13)   # specify which layers to use long-range memory, from 'Do Transformers Need LR Memory' paper
+    memory_layers = range(6, 13),  # specify which layers to use long-range memory, from 'Do Transformers Need LR Memory' paper
+    one_head_kv = True             # share one key/value head for all queries, from Shazeers 'One Write-Head is All You Need'
 )
 
 inputs = torch.randint(0, 256, (1, 2048))
@@ -117,5 +118,15 @@ sample = model.generate(prime, 4096)
     address = "Online",
     publisher = "Association for Computational Linguistics",
     url = "https://www.aclweb.org/anthology/2020.acl-main.672"
+}
+```
+
+```bibtex
+@article{Shazeer2019FastTD,
+    title   = {Fast Transformer Decoding: One Write-Head is All You Need},
+    author  = {Noam Shazeer},
+    journal = {ArXiv},
+    year    = {2019},
+    volume  = {abs/1911.02150}
 }
 ```

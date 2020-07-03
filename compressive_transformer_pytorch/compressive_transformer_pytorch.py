@@ -139,8 +139,10 @@ class FeedForward(nn.Module):
 # attention.
 
 class SelfAttention(nn.Module):
-    def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8, attn_dropout = 0., dropout = 0.):
+    def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8, attn_dropout = 0., dropout = 0., one_kv_head = False):
         super().__init__()
+        assert (dim % heads) == 0, 'dimension must be divisible by the number of heads'
+
         self.heads = heads
         self.dim_head = dim // heads
         self.seq_len = seq_len
@@ -152,7 +154,9 @@ class SelfAttention(nn.Module):
         self.compress_mem_fn = ConvCompress(dim, cmem_ratio)
 
         self.to_q = nn.Linear(dim, dim, bias = False)
-        self.to_kv = nn.Linear(dim, dim * 2, bias = False)
+
+        kv_dim = self.dim_head if one_kv_head else dim
+        self.to_kv = nn.Linear(dim, kv_dim * 2, bias = False)
         self.to_out = nn.Linear(dim, dim)
 
         self.attn_dropout = nn.Dropout(attn_dropout)
@@ -177,8 +181,10 @@ class SelfAttention(nn.Module):
         kv_len = kv_input.shape[1]
         k, v = self.to_kv(kv_input).chunk(2, dim=-1)
 
-        merge_heads = lambda x: x.reshape(b, -1, h, dim_h).transpose(1, 2)
+        merge_heads = lambda x: x.reshape(*x.shape[:2], -1, dim_h).transpose(1, 2)
         q, k, v = map(merge_heads, (q, k, v))
+
+        k, v = map(lambda x: x.expand(-1, h, -1, -1), (k, v))
 
         dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
         mask_value = max_neg_value(dots)
@@ -229,6 +235,7 @@ class SelfAttention(nn.Module):
             if self.training:
                 cmem_k, cmem_v = self.to_kv(compressed_mem).chunk(2, dim=-1)
                 cmem_k, cmem_v = map(merge_heads, (cmem_k, cmem_v))
+                cmem_k, cmem_v = map(lambda x: x.expand(-1, h, -1, -1), (cmem_k, cmem_v))
 
                 old_mem_range = slice(- min(mem_len, self.mem_len) - self.seq_len, -self.seq_len)
                 old_mem_k, old_mem_v = map(lambda x: x[:, :, old_mem_range].clone(), (k, v))
@@ -246,7 +253,7 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1.):
+    def __init__(self, num_tokens, dim, seq_len, depth, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
         super().__init__()
         mem_len = default(mem_len, seq_len)
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
@@ -265,7 +272,7 @@ class CompressiveTransformer(nn.Module):
 
         wrapper = partial(GRUGating, dim) if gru_gated_residual else Residual
 
-        self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout))) for _ in range(depth)])
+        self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout, one_kv_head = one_kv_head))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim, dropout = ff_dropout))) for _ in range(depth)])
 
         self.reconstruction_loss_weight = reconstruction_loss_weight
