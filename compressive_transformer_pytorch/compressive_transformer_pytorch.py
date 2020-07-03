@@ -259,6 +259,10 @@ class CompressiveTransformer(nn.Module):
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
         memory_layers = default(memory_layers, list(range(1, depth + 1)))
 
+        assert mem_len >= seq_len, 'length of memory should be at least the sequence length'
+        assert cmem_len >= (mem_len // cmem_ratio), f'length of compressed memory should be at least the memory length divided by the compression ratio {int(mem_len // cmem_ratio)}'
+        assert all([layer > 0 and layer <= depth for layer in memory_layers]), 'one of the indicated memory layers is invalid'
+
         self.seq_len = seq_len
 
         self.depth = depth
@@ -280,6 +284,7 @@ class CompressiveTransformer(nn.Module):
     def forward(self, x, memories = None, mask = None):
         x = self.token_emb(x)
         b, t, d = x.shape
+        assert t <= self.seq_len, f'input contains a sequence length {t} that is greater than the designated maximum sequence length {self.seq_len}'
 
         mem = cmem = None
         if memories is not None:
