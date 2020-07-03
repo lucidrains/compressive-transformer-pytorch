@@ -14,12 +14,13 @@ from torch.utils.data import DataLoader, Dataset
 
 NUM_BATCHES = int(1e5)
 BATCH_SIZE = 4
-GRADIENT_ACCUMULATE_EVERY = 4
 LEARNING_RATE = 1e-4
 VALIDATE_EVERY  = 100
+
 GENERATE_EVERY  = 500
 PRIME_LENGTH    = 512
 GENERATE_LENGTH = 1024
+
 SEQ_LEN = 512
 NUM_SEGMENTS = 4
 
@@ -37,8 +38,6 @@ def decode_tokens(tokens):
     return ''.join(list(map(decode_token, tokens)))
 
 # instantiate model
-
-shared_qk = True
 
 model = CompressiveTransformer(
     num_tokens = 256,
