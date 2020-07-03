@@ -1,10 +1,18 @@
 from functools import partial
+from collections import namedtuple
+
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
 from compressive_transformer_pytorch.autopadder import Autopadder
+
+# structs
+
+Return = namedtuple('Return', ['loss', 'aux_loss', 'is_last_batch'])
+
+# helper functions
 
 def top_p(logits, thres = 0.9):
     sorted_logits, sorted_indices = torch.sort(logits, descending=True)
@@ -23,6 +31,8 @@ def top_k(logits, thres = 0.9):
     probs = torch.full_like(logits, float('-inf'))
     probs.scatter_(1, ind, val)
     return probs
+
+# main class
 
 class AutoregressiveWrapper(nn.Module):
     def __init__(self, net, ignore_index = -100, pad_value = 0):
@@ -87,7 +97,7 @@ class AutoregressiveWrapper(nn.Module):
         self.net.train(was_training)
         return out
 
-    def forward(self, x, return_loss = False, **kwargs):
+    def forward(self, x, max_batch_size = None, return_loss = False, **kwargs):
         pad = partial(pad_sequence, batch_first = True, padding_value = self.pad_value)
 
         if not return_loss:
@@ -115,7 +125,17 @@ class AutoregressiveWrapper(nn.Module):
         mask = segment_fn(mask) if mask is not None else ((None,) * num_segments)
 
         mem = None
+        max_batch_size = x.shape[0] if max_batch_size is None else max_batch_size
+        split_batch_fn = lambda x: x.split(max_batch_size, dim=0)
+
         for xi_seg, xo_seg, mask_seg in zip(xi, xo, mask):
-            logits, mem, aux_loss = self.net(xi_seg, mask = mask_seg, memories = mem, **kwargs)
-            loss = F.cross_entropy(logits.transpose(1, 2), xo_seg, ignore_index = self.ignore_index)
-            yield loss, aux_loss
+            xi_seg, xo_seg = map(split_batch_fn, (xi_seg, xo_seg))
+            gradient_accumulate_every = len(xi_seg)
+            mask_seg = split_batch_fn(mask_seg) if mask_seg is not None else ((None,) * gradient_accumulate_every)
+
+            for ind, (xi_seg_b, xo_seg_b, mask_seg_b) in enumerate(zip(xi_seg, xo_seg, mask_seg)):
+                is_last = ind == (gradient_accumulate_every - 1)
+
+                logits, mem, aux_loss = self.net(xi_seg_b, mask = mask_seg_b, memories = mem, **kwargs)
+                loss = F.cross_entropy(logits.transpose(1, 2), xo_seg_b, ignore_index = self.ignore_index)
+                yield Return(loss, aux_loss, is_last)
