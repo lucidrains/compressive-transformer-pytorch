@@ -45,27 +45,41 @@ class AutoregressiveWrapper(nn.Module):
 
         self.net.eval()
         out = start_tokens
-        mask = kwargs.pop('mask', None)
 
+        # take care of a primed sequence of any length
+
+        mem = None
+        out = out.split(self.seq_len, dim=1)[:-1]
+        for segment in out:
+            _, mem, _ = self.net(segment, memories = mem, **kwargs)
+        out = out[-1]
+
+        # take care of default masking
+
+        mask = kwargs.pop('mask', None)
         if mask is None:
             mask = torch.full_like(out, True, dtype=torch.bool, device=out.device)
 
+        # generate until hit sequence length
+
         for _ in range(seq_len):
-            x = out[:, -self.seq_len:]
-            mask = mask[:, -self.seq_len:]
-            logits, mem, aux_loss = self.net(x, mask=mask, **kwargs)
+            logits, mem, aux_loss = self.net(out, mask = mask, memories = mem, **kwargs)
             logits = logits[:, -1, :]
             filtered_logits = filter_logits_fn(logits, thres = filter_thres)
             probs = F.softmax(filtered_logits / temperature, dim=-1)
             sample = torch.multinomial(probs, 1)
 
-            out = torch.cat((out, sample), dim=-1)
-            mask = F.pad(mask, (0, 1), value=True)
+            # unlike most models, start from sequence length of 1 once full sequence length is filled
+
+            if self.seq_len == out.shape[1]:
+                out = sample
+                mask = torch.full_like(out, True, dtype=torch.bool, device=out.device)
+            else:
+                out = torch.cat((out, sample), dim=-1)
+                mask = F.pad(mask, (0, 1), value=True)
 
             if eos_token is not None and (sample == eos_token).all():
                 break
-
-        out = out[:, t:]
 
         if num_dims == 1:
             out = out.squeeze(0)

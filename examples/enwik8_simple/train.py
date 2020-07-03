@@ -18,7 +18,8 @@ GRADIENT_ACCUMULATE_EVERY = 4
 LEARNING_RATE = 1e-4
 VALIDATE_EVERY  = 100
 GENERATE_EVERY  = 500
-GENERATE_LENGTH = 512
+PRIME_LENGTH    = 512
+GENERATE_LENGTH = 1024
 SEQ_LEN = 512
 NUM_SEGMENTS = 4
 
@@ -91,8 +92,7 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
         loss = mlm_loss + aux_loss
         loss.backward()
 
-        print(f'training loss: {mlm_loss.item()}')
-        print(f'compressed memory reconstruction loss: {aux_loss.item()}')
+        print(f'training loss: {mlm_loss.item():.4f} | aux_loss: {aux_loss.item():.4f}')
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
         optim.step()
@@ -102,11 +102,12 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
         model.eval()
         with torch.no_grad():
             for loss, aux_loss in model(next(val_loader), return_loss = True):
-                print(f'validation loss: {loss.item()}')
+                print(f'validation loss: {loss.item():.4f}')
 
     if i % GENERATE_EVERY == 0:
         model.eval()
         inp = random.choice(val_dataset)[:-1]
+        inp = inp[:, :PRIME_LENGTH]
         prime = decode_tokens(inp)
         print(f'%s \n\n %s', (prime, '*' * 100))
 

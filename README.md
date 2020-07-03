@@ -67,6 +67,14 @@ inputs = torch.randint(0, 20000, (1, 2048 + 1)).cuda()
 for loss, aux_loss in model(inputs, return_loss = True):
     (loss + aux_loss).backward()
     # optimizer step and zero grad
+
+
+# generation is also greatly simplified and automated away
+# just pass in the prime, which can be 1 start token or any length
+# all is taken care of for you
+
+prime = torch.ones(1, 1).cuda()  # assume 1 is start token
+sample = model.generate(prime, 4096)
 ```
 
 
