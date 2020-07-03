@@ -184,6 +184,7 @@ class SelfAttention(nn.Module):
         mask_value = max_neg_value(dots)
 
         if pos_emb is not None:
+            pos_emb = pos_emb[:, -kv_len:]
             pos_dots = torch.einsum('bhid,hjd->bhij', q, pos_emb) * self.scale
             pos_dots = shift(pos_dots)
             dots = dots + pos_dots
@@ -289,11 +290,13 @@ class CompressiveTransformer(nn.Module):
         mem_iter = iterate_tensor(mem)
         cmem_iter = iterate_tensor(cmem)
 
-        for ind, (attn, ff, m, c) in enumerate(zip(self.attn_layers, self.ff_layers, mem, cmem)):
+        for ind, (attn, ff) in enumerate(zip(self.attn_layers, self.ff_layers)):
             layer_num = ind + 1
             use_memory = layer_num in self.memory_layers
 
-            memories = (next(mem_iter), next(cmem_iter)) if use_memory else None
+            memories = None
+            if use_memory:
+                memories = (next(mem_iter), next(cmem_iter))
 
             x, (mem_out, cmem_out), layer_aux_loss = attn(x, memories = memories, calc_memory = use_memory, input_mask = mask, pos_emb = pos_emb)
             x, = ff(x)

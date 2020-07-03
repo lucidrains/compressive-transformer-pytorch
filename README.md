@@ -41,6 +41,34 @@ logits,        _, aux_loss = model(segments[1], mask = masks[1], memories = memo
 # memories is a named tuple that contains the memory (mem) and the compressed memory (cmem)
 ```
 
+When training, you can use the `AutoregressiveWrapper` to have memory management across segments taken care of for you. As easy as it gets.
+
+```python
+import torch
+from compressive_transformer_pytorch import CompressiveTransformer
+from compressive_transformer_pytorch import AutoregressiveWrapper
+
+model = CompressiveTransformer(
+    num_tokens = 20000,
+    dim = 512,
+    depth = 6,
+    seq_len = 1024,
+    mem_len = 1024,
+    cmem_len = 256,
+    cmem_ratio = 4,
+    memory_layers = [5,6]
+).cuda()
+
+model = AutoregressiveWrapper(model)
+
+inputs = torch.randint(0, 20000, (1, 2048 + 1)).cuda()
+
+for loss, aux_loss in model(inputs, return_loss = True):
+    (loss + aux_loss).backward()
+    # optimizer step and zero grad
+```
+
+
 ## Citations
 
 ```bibtex
