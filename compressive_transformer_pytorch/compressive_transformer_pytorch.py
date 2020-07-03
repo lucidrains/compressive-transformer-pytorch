@@ -16,12 +16,15 @@ def to(t):
     return {'dtype': t.dtype, 'device': t.device}
 
 def cast_tuple(el):
-    return el if isinstance(el, tuple) else tuple(el)
+    return el if isinstance(el, tuple) else (el,)
 
 def default(x, val):
     if x is not None:
         return x
     return val if not isfunction(val) else val()
+
+def max_neg_value(tensor):
+    return -torch.finfo(tensor.dtype).max
 
 def split_at_index(dim, index, t):
     pre_slices = (slice(None),) * dim
@@ -72,7 +75,7 @@ class GRUGating(nn.Module):
     def forward(self, x, **kwargs):
         batch, dim = x.shape[0], self.dim
         out = self.fn(x, **kwargs)
-        y, *rest = cast_tuple(out)
+        (y, *rest) = cast_tuple(out)
 
         gated_output, _ = self.gru(
             y.reshape(1, -1, dim),
@@ -178,6 +181,7 @@ class SelfAttention(nn.Module):
         q, k, v = map(merge_heads, (q, k, v))
 
         dots = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
+        mask_value = max_neg_value(dots)
 
         if pos_emb is not None:
             pos_dots = torch.einsum('bhid,hjd->bhij', q, pos_emb) * self.scale
@@ -187,10 +191,10 @@ class SelfAttention(nn.Module):
         if input_mask is not None:
             mask = input_mask[:, None, :, None] * input_mask[:, None, None, :]
             mask = F.pad(mask, (mem_len + cmem_len, 0), value = False)
-            dots.masked_fill_(~mask, float('-inf'))
+            dots.masked_fill_(~mask, mask_value)
 
         mask = torch.ones(t, kv_len, **to(x)).triu_(diagonal = 1 + kv_len).bool()
-        dots.masked_fill_(mask[None, None, ...], float('-inf'))
+        dots.masked_fill_(mask[None, None, ...], mask_value)
 
         attn = dots.softmax(dim=-1)
         attn = self.attn_dropout(attn)
@@ -280,7 +284,7 @@ class CompressiveTransformer(nn.Module):
 
         next_mem = []
         next_cmem = []
-        aux_loss = torch.zeros(1, requires_grad = True, **to(x))
+        aux_loss = torch.tensor(0., requires_grad = True, **to(x))
 
         mem_iter = iterate_tensor(mem)
         cmem_iter = iterate_tensor(cmem)
