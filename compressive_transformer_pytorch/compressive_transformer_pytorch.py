@@ -246,7 +246,7 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0.):
+    def __init__(self, num_tokens, dim, seq_len, depth, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1.):
         super().__init__()
         mem_len = default(mem_len, seq_len)
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
@@ -267,6 +267,8 @@ class CompressiveTransformer(nn.Module):
 
         self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim, dropout = ff_dropout))) for _ in range(depth)])
+
+        self.reconstruction_loss_weight = reconstruction_loss_weight
 
     def forward(self, x, memories = None, mask = None):
         x = self.token_emb(x)
@@ -311,4 +313,6 @@ class CompressiveTransformer(nn.Module):
 
         next_mem, next_cmem = map(torch.stack, (next_mem, next_cmem))
         next_mem, next_cmem = map(lambda x: x.detach(), (next_mem, next_cmem))
+
+        aux_loss = aux_loss * self.reconstruction_loss_weight
         return out, Memory(mem = next_mem, compressed_mem = next_cmem), aux_loss
