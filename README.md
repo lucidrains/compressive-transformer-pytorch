@@ -20,6 +20,7 @@ from compressive_transformer_pytorch import CompressiveTransformer
 
 model = CompressiveTransformer(
     num_tokens = 20000,
+    emb_dim = 128,                 # embedding dimensions, embedding factorization from Albert paper
     dim = 512,
     depth = 12,
     seq_len = 1024,
@@ -138,5 +139,14 @@ sample = model.generate(prime, 4096)
     author  = {Noam Shazeer},
     year    = {2020},
     url     = {https://arxiv.org/abs/2002.05202}
+}
+```
+
+```bibtex
+@misc{lan2019albert,
+    title       = {ALBERT: A Lite BERT for Self-supervised Learning of Language Representations},
+    author      = {Zhenzhong Lan and Mingda Chen and Sebastian Goodman and Kevin Gimpel and Piyush Sharma and Radu Soricut},
+    year        = {2019},
+    url         = {https://arxiv.org/abs/1909.11942}
 }
 ```

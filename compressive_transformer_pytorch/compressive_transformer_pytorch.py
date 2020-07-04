@@ -254,8 +254,9 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_glu = False, ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
+    def __init__(self, num_tokens, dim, seq_len, depth, emb_dim = None, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_glu = False, ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
         super().__init__()
+        emb_dim = default(emb_dim, dim)
         mem_len = default(mem_len, seq_len)
         cmem_len = default(cmem_len, mem_len // cmem_ratio)
         memory_layers = default(memory_layers, list(range(1, depth + 1)))
@@ -269,11 +270,16 @@ class CompressiveTransformer(nn.Module):
         self.depth = depth
         self.memory_layers = list(memory_layers)
 
-        self.token_emb = nn.Embedding(num_tokens, dim)
+        self.token_emb = nn.Embedding(num_tokens, emb_dim)
+        self.to_model_dim = nn.Identity() if emb_dim == dim else nn.Linear(emb_dim, dim)
 
         seq_and_mem_len = seq_len + mem_len + cmem_len
         self.pos_emb = nn.Parameter(torch.zeros(heads, seq_and_mem_len, dim // heads))
-        self.to_logits = nn.Linear(dim, num_tokens)
+        
+        self.to_logits = nn.Sequential(
+            nn.Identity() if emb_dim == dim else nn.Linear(dim, emb_dim),
+            nn.Linear(emb_dim, num_tokens)
+        )
 
         wrapper = partial(GRUGating, dim) if gru_gated_residual else Residual
 
@@ -284,7 +290,9 @@ class CompressiveTransformer(nn.Module):
 
     def forward(self, x, memories = None, mask = None):
         x = self.token_emb(x)
+        x = self.to_model_dim(x)
         b, t, d = x.shape
+
         assert t <= self.seq_len, f'input contains a sequence length {t} that is greater than the designated maximum sequence length {self.seq_len}'
 
         mem = cmem = None
