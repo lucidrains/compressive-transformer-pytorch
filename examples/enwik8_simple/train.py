@@ -45,7 +45,10 @@ model = CompressiveTransformer(
     dim = 512,
     depth = 8,
     seq_len = SEQ_LEN,
-    heads = 8
+    mem_len = SEQ_LEN,
+    cmem_len = SEQ_LEN // 4,
+    heads = 8,
+    memory_layers = [6,7,8]
 )
 
 model = AutoregressiveWrapper(model)
