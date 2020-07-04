@@ -327,5 +327,5 @@ class CompressiveTransformer(nn.Module):
         next_mem, next_cmem = map(torch.stack, (next_mem, next_cmem))
         next_mem, next_cmem = map(lambda x: x.detach(), (next_mem, next_cmem))
 
-        aux_loss = aux_loss * self.reconstruction_loss_weight
+        aux_loss = aux_loss * self.reconstruction_loss_weight / num_memory_layers
         return out, Memory(mem = next_mem, compressed_mem = next_cmem), aux_loss
