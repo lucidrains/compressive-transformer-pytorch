@@ -198,10 +198,11 @@ class SelfAttention(nn.Module):
 
         if input_mask is not None:
             mask = input_mask[:, None, :, None] * input_mask[:, None, None, :]
-            mask = F.pad(mask, (mem_len + cmem_len, 0), value = False)
+            mask = F.pad(mask, (mem_len + cmem_len, 0), value = True)
             dots.masked_fill_(~mask, mask_value)
 
-        mask = torch.ones(t, kv_len, **to(x)).triu_(diagonal = 1 + kv_len).bool()
+        total_mem_len = mem_len + cmem_len
+        mask = torch.ones(t, t + total_mem_len, **to(x)).triu_(diagonal = 1 + total_mem_len).bool()
         dots.masked_fill_(mask[None, None, ...], mask_value)
 
         attn = dots.softmax(dim=-1)
@@ -247,7 +248,6 @@ class SelfAttention(nn.Module):
                     full_attn(q, old_mem_k, old_mem_v),
                     full_attn(q, cmem_k, cmem_v)
                 )
-
 
         return logits, Memory(new_mem, new_cmem), aux_loss
 

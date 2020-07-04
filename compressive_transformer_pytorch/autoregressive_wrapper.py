@@ -55,39 +55,47 @@ class AutoregressiveWrapper(nn.Module):
         b, t = start_tokens.shape
 
         self.net.eval()
+
         out = start_tokens
+        inp = start_tokens
 
         # take care of a primed sequence of any length
 
         mem = None
-        *primes, out = out.split(self.seq_len, dim=1)
+        *primes, inp = inp.split(self.seq_len, dim=1)
 
         for segment in primes:
             _, mem, _ = self.net(segment, memories = mem, **kwargs)
 
         # take care of default masking
 
+        full_mask_like = lambda x: torch.full_like(x, True, dtype=torch.bool, device=x.device)
+
         mask = kwargs.pop('mask', None)
         if mask is None:
-            mask = torch.full_like(out, True, dtype=torch.bool, device=out.device)
+            mask = full_mask_like(inp)
 
         # generate until hit sequence length
 
         for _ in range(seq_len):
-            logits, mem, aux_loss = self.net(out, mask = mask, memories = mem, **kwargs)
+            logits, mem, aux_loss = self.net(inp, memories = mem, **kwargs)
             logits = logits[:, -1, :]
             filtered_logits = filter_logits_fn(logits, thres = filter_thres)
             probs = F.softmax(filtered_logits / temperature, dim=-1)
             sample = torch.multinomial(probs, 1)
 
-            # unlike most models, start from sequence length of 1 once full sequence length is filled
+            # unlike most models, inputs start from sequence length of 1 once full sequence length is filled
 
-            if self.seq_len == out.shape[1]:
-                out = sample
-                mask = torch.full_like(out, True, dtype=torch.bool, device=out.device)
+            if self.seq_len == inp.shape[1]:
+                inp = sample
+                mask = full_mask_like(inp)
             else:
-                out = torch.cat((out, sample), dim=-1)
+                inp = torch.cat((inp, sample), dim=-1)
                 mask = F.pad(mask, (0, 1), value=True)
+
+            # append sample to accumulated output
+
+            out = torch.cat((out, sample), dim=-1)
 
             if eos_token is not None and (sample == eos_token).all():
                 break
@@ -135,11 +143,14 @@ class AutoregressiveWrapper(nn.Module):
             xi_seg, xo_seg = map(split_batch_fn, (xi_seg, xo_seg))
             mask_seg = split_batch_fn(mask_seg) if mask_seg is not None else ((None,) * grad_accumulate_every)
 
+            new_mems = []
             for ind, (xi_seg_b, xo_seg_b, mask_seg_b, mem) in enumerate(zip(xi_seg, xo_seg, mask_seg, mems)):
                 is_last = ind == (grad_accumulate_every - 1)
 
                 logits, new_mem, aux_loss = self.net(xi_seg_b, mask = mask_seg_b, memories = mem, **kwargs)
-                mems[ind] = new_mem
+                new_mems.append(new_mem)
 
                 loss = F.cross_entropy(logits.transpose(1, 2), xo_seg_b, ignore_index = self.ignore_index)
                 yield Return(loss, aux_loss, is_last)
+
+            mems = new_mems
