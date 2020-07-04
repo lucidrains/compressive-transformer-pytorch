@@ -57,15 +57,6 @@ class AutoregressiveWrapper(nn.Module):
         self.net.eval()
 
         out = start_tokens
-        inp = start_tokens
-
-        # take care of a primed sequence of any length
-
-        mem = None
-        *primes, inp = inp.split(self.seq_len, dim=1)
-
-        for segment in primes:
-            _, mem, _ = self.net(segment, memories = mem, **kwargs)
 
         # take care of default masking
 
@@ -73,12 +64,23 @@ class AutoregressiveWrapper(nn.Module):
 
         mask = kwargs.pop('mask', None)
         if mask is None:
-            mask = full_mask_like(inp)
+            mask = full_mask_like(out)
+
+        # take care of a primed sequence of any length
+
+        mem = None
+        *primes, out = out.split(self.seq_len, dim=1)
+        *prime_masks, mask = mask.split(self.seq_len, dim=1)
+
+        for prime, prime_mask in zip(primes, prime_masks):
+            _, mem, _ = self.net(prime, memories = mem, mask = prime_mask, **kwargs)
 
         # generate until hit sequence length
 
+        input_len = out.shape[1]
+
         for _ in range(seq_len):
-            logits, mem, aux_loss = self.net(inp, memories = mem, **kwargs)
+            logits, mem, aux_loss = self.net(out[:, -input_len:], memories = mem, mask = mask[:, -input_len:], **kwargs)
             logits = logits[:, -1, :]
             filtered_logits = filter_logits_fn(logits, thres = filter_thres)
             probs = F.softmax(filtered_logits / temperature, dim=-1)
@@ -86,19 +88,18 @@ class AutoregressiveWrapper(nn.Module):
 
             # unlike most models, inputs start from sequence length of 1 once full sequence length is filled
 
-            if self.seq_len == inp.shape[1]:
-                inp = sample
-                mask = full_mask_like(inp)
-            else:
-                inp = torch.cat((inp, sample), dim=-1)
-                mask = F.pad(mask, (0, 1), value=True)
-
-            # append sample to accumulated output
-
             out = torch.cat((out, sample), dim=-1)
+            mask = F.pad(mask, (0, 1), value=True)
+
+            # append sample to accumulated output            
+
+            input_len = input_len % self.seq_len
+            input_len += 1
 
             if eos_token is not None and (sample == eos_token).all():
                 break
+
+        out = out[:, t:]
 
         if num_dims == 1:
             out = out.squeeze(0)
