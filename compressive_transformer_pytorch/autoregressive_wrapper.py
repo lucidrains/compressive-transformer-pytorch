@@ -1,3 +1,4 @@
+import math
 from functools import partial
 from collections import namedtuple
 
@@ -124,18 +125,21 @@ class AutoregressiveWrapper(nn.Module):
         num_segments = len(xi)
         mask = segment_fn(mask) if mask is not None else ((None,) * num_segments)
 
-        mem = None
         max_batch_size = x.shape[0] if max_batch_size is None else max_batch_size
         split_batch_fn = lambda x: x.split(max_batch_size, dim=0)
 
+        grad_accumulate_every = math.ceil(x.shape[0] / max_batch_size)
+        mems = [None] * grad_accumulate_every
+
         for xi_seg, xo_seg, mask_seg in zip(xi, xo, mask):
             xi_seg, xo_seg = map(split_batch_fn, (xi_seg, xo_seg))
-            gradient_accumulate_every = len(xi_seg)
-            mask_seg = split_batch_fn(mask_seg) if mask_seg is not None else ((None,) * gradient_accumulate_every)
+            mask_seg = split_batch_fn(mask_seg) if mask_seg is not None else ((None,) * grad_accumulate_every)
 
-            for ind, (xi_seg_b, xo_seg_b, mask_seg_b) in enumerate(zip(xi_seg, xo_seg, mask_seg)):
-                is_last = ind == (gradient_accumulate_every - 1)
+            for ind, (xi_seg_b, xo_seg_b, mask_seg_b, mem) in enumerate(zip(xi_seg, xo_seg, mask_seg, mems)):
+                is_last = ind == (grad_accumulate_every - 1)
 
-                logits, mem, aux_loss = self.net(xi_seg_b, mask = mask_seg_b, memories = mem, **kwargs)
+                logits, new_mem, aux_loss = self.net(xi_seg_b, mask = mask_seg_b, memories = mem, **kwargs)
+                mems[ind] = new_mem
+
                 loss = F.cross_entropy(logits.transpose(1, 2), xo_seg_b, ignore_index = self.ignore_index)
                 yield Return(loss, aux_loss, is_last)
