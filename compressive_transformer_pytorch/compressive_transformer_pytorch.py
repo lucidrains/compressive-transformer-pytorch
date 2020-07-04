@@ -216,7 +216,7 @@ class SelfAttention(nn.Module):
         new_cmem = cmem
         aux_loss = torch.zeros(1, requires_grad = True, **to(q))
 
-        if self.seq_len < t or not calc_memory:
+        if self.seq_len > t or not calc_memory:
             return logits, Memory(new_mem, new_cmem), aux_loss
 
         # calculate memory and compressed memory
@@ -295,7 +295,7 @@ class CompressiveTransformer(nn.Module):
         mem = default(mem, lambda: torch.empty(num_memory_layers, b, 0, d, **to(x)))
         cmem = default(cmem, lambda: torch.empty(num_memory_layers, b, 0, d, **to(x)))
 
-        total_len = mem.shape[2] + cmem.shape[2] + t
+        total_len = mem.shape[2] + cmem.shape[2] + self.seq_len
         pos_emb = self.pos_emb[:, (self.seq_len - t):total_len]
 
         next_mem = []
