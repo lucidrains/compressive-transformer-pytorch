@@ -110,7 +110,7 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
     if i % GENERATE_EVERY == 0:
         model.eval()
         inp = random.choice(val_dataset)[:-1]
-        inp = inp[:, :PRIME_LENGTH]
+        inp = inp[:PRIME_LENGTH]
         prime = decode_tokens(inp)
         print(f'%s \n\n %s', (prime, '*' * 100))
 

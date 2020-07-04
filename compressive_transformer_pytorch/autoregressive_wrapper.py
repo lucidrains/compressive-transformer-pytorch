@@ -59,10 +59,10 @@ class AutoregressiveWrapper(nn.Module):
         # take care of a primed sequence of any length
 
         mem = None
-        out = out.split(self.seq_len, dim=1)[:-1]
-        for segment in out:
+        *primes, out = out.split(self.seq_len, dim=1)
+
+        for segment in primes:
             _, mem, _ = self.net(segment, memories = mem, **kwargs)
-        out = out[-1]
 
         # take care of default masking
 
