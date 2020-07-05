@@ -50,10 +50,13 @@ def iterate_tensor(t):
         yield t[ind]
 
 # full attention for calculating auxiliary reconstruction loss
-def full_attn(q, k, v):
+
+def full_attn(q, k, v, dropout_fn = None):
     *_, dim = q.shape
     dots = torch.einsum('bhid,bhjd->bhij', q, k) * (dim ** -0.5)
     attn = dots.softmax(dim=-1)
+    if dropout_fn is not None:
+        attn = dropout_fn(attn)
     return torch.einsum('bhij,bhjd->bhid', attn, v)
 
 # helper classes
@@ -146,7 +149,7 @@ class FeedForward(nn.Module):
 # attention.
 
 class SelfAttention(nn.Module):
-    def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8, attn_dropout = 0., dropout = 0., one_kv_head = False):
+    def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8, attn_dropout = 0., dropout = 0., reconstruction_attn_dropout = 0., one_kv_head = False):
         super().__init__()
         assert (dim % heads) == 0, 'dimension must be divisible by the number of heads'
 
@@ -168,6 +171,8 @@ class SelfAttention(nn.Module):
 
         self.attn_dropout = nn.Dropout(attn_dropout)
         self.dropout = nn.Dropout(dropout)
+
+        self.reconstruction_attn_dropout = nn.Dropout(reconstruction_attn_dropout)
 
     def forward(self, x, memories = None, pos_emb = None, input_mask = None, calc_memory = True, **kwargs):
         b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
@@ -250,9 +255,11 @@ class SelfAttention(nn.Module):
 
                 q, old_mem_k, old_mem_v, cmem_k, cmem_v = map(lambda x: x.detach(), (q, old_mem_k, old_mem_v, cmem_k, cmem_v))
 
+                attn_fn = partial(full_attn, dropout_fn = self.reconstruction_attn_dropout)
+
                 aux_loss = F.mse_loss(
-                    full_attn(q, old_mem_k, old_mem_v),
-                    full_attn(q, cmem_k, cmem_v)
+                    attn_fn(q, old_mem_k, old_mem_v),
+                    attn_fn(q, cmem_k, cmem_v)
                 )
 
         return logits, Memory(new_mem, new_cmem), aux_loss
@@ -260,7 +267,7 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, emb_dim = None, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, mogrify_gru = False, attn_dropout = 0., ff_glu = False, ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
+    def __init__(self, num_tokens, dim, seq_len, depth, emb_dim = None, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, mogrify_gru = False, attn_dropout = 0., ff_glu = False, ff_dropout = 0., attn_layer_dropout = 0., reconstruction_attn_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
         super().__init__()
         emb_dim = default(emb_dim, dim)
         mem_len = default(mem_len, seq_len)
@@ -289,7 +296,7 @@ class CompressiveTransformer(nn.Module):
 
         wrapper = partial(GRUGating, dim, mogrify = mogrify_gru) if gru_gated_residual else Residual
 
-        self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout, one_kv_head = one_kv_head))) for _ in range(depth)])
+        self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout, reconstruction_attn_dropout = reconstruction_attn_dropout, one_kv_head = one_kv_head))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim, dropout = ff_dropout, glu = ff_glu))) for _ in range(depth)])
 
         self.reconstruction_loss_weight = reconstruction_loss_weight
