@@ -1,10 +1,12 @@
-from collections import namedtuple
-
-from functools import partial
-from inspect import isfunction
 import torch
 from torch import nn
 import torch.nn.functional as F
+
+from mogrifier import Mogrifier
+
+from collections import namedtuple
+from functools import partial
+from inspect import isfunction
 
 # structs
 
@@ -67,16 +69,20 @@ class Residual(nn.Module):
         return ret
 
 class GRUGating(nn.Module):
-    def __init__(self, dim, fn):
+    def __init__(self, dim, fn, mogrify = False):
         super().__init__()
         self.dim = dim
         self.fn = fn
         self.gru = nn.GRU(dim, dim)
+        self.mogrify = Mogrifier(dim, factorize_k = dim // 4) if mogrify else None
 
     def forward(self, x, **kwargs):
         batch, dim = x.shape[0], self.dim
         out = self.fn(x, **kwargs)
         (y, *rest) = cast_tuple(out)
+
+        if self.mogrify is not None:
+            y, x = self.mogrify(y, x)
 
         gated_output, _ = self.gru(
             y.reshape(1, -1, dim),
@@ -254,7 +260,7 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, emb_dim = None, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, attn_dropout = 0., ff_glu = False, ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
+    def __init__(self, num_tokens, dim, seq_len, depth, emb_dim = None, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, mogrify_gru = False, attn_dropout = 0., ff_glu = False, ff_dropout = 0., attn_layer_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
         super().__init__()
         emb_dim = default(emb_dim, dim)
         mem_len = default(mem_len, seq_len)
@@ -281,7 +287,7 @@ class CompressiveTransformer(nn.Module):
             nn.Linear(emb_dim, num_tokens)
         )
 
-        wrapper = partial(GRUGating, dim) if gru_gated_residual else Residual
+        wrapper = partial(GRUGating, dim, mogrify = mogrify_gru) if gru_gated_residual else Residual
 
         self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout, one_kv_head = one_kv_head))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim, dropout = ff_dropout, glu = ff_glu))) for _ in range(depth)])
