@@ -4,6 +4,8 @@
 
 Pytorch implementation of <a href="https://openreview.net/forum?id=SylKikSYDH">Compressive Transformers</a>, a variant of Transformer-XL with compressed memory for long-range language modelling. I will also combine this with an idea from <a href="https://arxiv.org/abs/1910.06764">another paper</a> that adds gating at the residual intersection. The memory and the gating may be synergistic, and lead to further improvements in both language modeling as well as reinforcement learning.
 
+Finally, I will add a dedicated memory lane, similar to what was demonstrated in the <a href="https://arxiv.org/abs/2006.11527">Memory Transformers</a> paper, relying on efficient linear attention (and perhaps gating) to act on storing compressed memory to be discarded.
+
 [![PyPI version](https://badge.fury.io/py/compressive-transformer-pytorch.svg)](https://badge.fury.io/py/compressive-transformer-pytorch)
 
 ## Install
@@ -150,5 +152,16 @@ sample = model.generate(prime, 4096)
     author      = {Zhenzhong Lan and Mingda Chen and Sebastian Goodman and Kevin Gimpel and Piyush Sharma and Radu Soricut},
     year        = {2019},
     url         = {https://arxiv.org/abs/1909.11942}
+}
+```
+
+```bibtex
+@misc{burtsev2020memory,
+    title   = {Memory Transformer},
+    author  = {Mikhail S. Burtsev and Grigory V. Sapunov},
+    year    = {2020},
+    eprint  = {2006.11527},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
 }
 ```
