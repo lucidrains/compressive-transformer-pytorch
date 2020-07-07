@@ -239,7 +239,7 @@ class SelfAttention(nn.Module):
         if old_mem_padding != 0:
             old_mem = F.pad(old_mem, (0, 0, old_mem_padding, 0), value = 0.)
 
-        if old_mem.shape[1] != 0:
+        if old_mem.shape[1] != 0 and self.cmem_len > 0:
             compressed_mem = self.compress_mem_fn(old_mem)
             old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
 
