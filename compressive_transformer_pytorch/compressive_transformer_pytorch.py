@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from mogrifier import Mogrifier
 
+import math
 from collections import namedtuple
 from functools import partial
 from inspect import isfunction

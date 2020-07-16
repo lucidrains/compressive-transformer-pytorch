@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'compressive-transformer-pytorch',
   packages = find_packages(exclude=['examples']),
-  version = '0.3.17',
+  version = '0.3.18',
   license='MIT',
   description = 'Implementation of Compressive Transformer in Pytorch',
   author = 'Phil Wang',
