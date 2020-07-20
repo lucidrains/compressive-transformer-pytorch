@@ -7,8 +7,6 @@ from torch import nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
-from compressive_transformer_pytorch.autopadder import Autopadder
-
 # structs
 
 Return = namedtuple('Return', ['loss', 'aux_loss', 'is_last_batch'])
