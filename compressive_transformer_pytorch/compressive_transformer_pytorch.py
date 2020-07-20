@@ -254,7 +254,7 @@ class SelfAttention(nn.Module):
                 old_mem_range = slice(- min(mem_len, self.mem_len) - self.seq_len, -self.seq_len)
                 old_mem_k, old_mem_v = map(lambda x: x[:, :, old_mem_range].clone(), (k, v))
 
-                q, old_mem_k, old_mem_v, cmem_k, cmem_v = map(lambda x: x.detach(), (q, old_mem_k, old_mem_v, cmem_k, cmem_v))
+                q, old_mem_k, old_mem_v, cmem_k, cmem_v = map(torch.detach, (q, old_mem_k, old_mem_v, cmem_k, cmem_v))
 
                 attn_fn = partial(full_attn, dropout_fn = self.reconstruction_attn_dropout)
 
@@ -347,7 +347,7 @@ class CompressiveTransformer(nn.Module):
         out = self.to_logits(x)
 
         next_mem, next_cmem = map(torch.stack, (next_mem, next_cmem))
-        next_mem, next_cmem = map(lambda x: x.detach(), (next_mem, next_cmem))
+        next_mem, next_cmem = map(torch.detach, (next_mem, next_cmem))
 
         aux_loss = aux_loss * self.reconstruction_loss_weight / num_memory_layers
         return out, Memory(mem = next_mem, compressed_mem = next_cmem), aux_loss
