@@ -247,28 +247,32 @@ class SelfAttention(nn.Module):
         if old_mem_padding != 0:
             old_mem = F.pad(old_mem, (0, 0, old_mem_padding, 0), value = 0.)
 
-        if old_mem.shape[1] != 0 and self.cmem_len > 0:
-            compressed_mem = self.compress_mem_fn(old_mem)
-            old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
+        if old_mem.shape[1] == 0 or self.cmem_len <= 0:
+            return logits, Memory(new_mem, new_cmem), aux_loss
 
-            # calculate auxiliary loss if training
+        compressed_mem = self.compress_mem_fn(old_mem)
+        old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
 
-            if self.training:
-                cmem_k, cmem_v = self.to_kv(compressed_mem).chunk(2, dim=-1)
-                cmem_k, cmem_v = map(merge_heads, (cmem_k, cmem_v))
-                cmem_k, cmem_v = map(lambda x: x.expand(-1, h, -1, -1), (cmem_k, cmem_v))
+        if not self.training:
+            return logits, Memory(new_mem, new_cmem), aux_loss
 
-                old_mem_range = slice(- min(mem_len, self.mem_len) - self.seq_len, -self.seq_len)
-                old_mem_k, old_mem_v = map(lambda x: x[:, :, old_mem_range].clone(), (k, v))
+        # calculate compressed memory auxiliary loss if training
 
-                q, old_mem_k, old_mem_v, cmem_k, cmem_v = map(torch.detach, (q, old_mem_k, old_mem_v, cmem_k, cmem_v))
+        cmem_k, cmem_v = self.to_kv(compressed_mem).chunk(2, dim=-1)
+        cmem_k, cmem_v = map(merge_heads, (cmem_k, cmem_v))
+        cmem_k, cmem_v = map(lambda x: x.expand(-1, h, -1, -1), (cmem_k, cmem_v))
 
-                attn_fn = partial(full_attn, dropout_fn = self.reconstruction_attn_dropout)
+        old_mem_range = slice(- min(mem_len, self.mem_len) - self.seq_len, -self.seq_len)
+        old_mem_k, old_mem_v = map(lambda x: x[:, :, old_mem_range].clone(), (k, v))
 
-                aux_loss = F.mse_loss(
-                    attn_fn(q, old_mem_k, old_mem_v),
-                    attn_fn(q, cmem_k, cmem_v)
-                )
+        q, old_mem_k, old_mem_v, cmem_k, cmem_v = map(torch.detach, (q, old_mem_k, old_mem_v, cmem_k, cmem_v))
+
+        attn_fn = partial(full_attn, dropout_fn = self.reconstruction_attn_dropout)
+
+        aux_loss = F.mse_loss(
+            attn_fn(q, old_mem_k, old_mem_v),
+            attn_fn(q, cmem_k, cmem_v)
+        )
 
         return logits, Memory(new_mem, new_cmem), aux_loss
 
