@@ -29,6 +29,13 @@ def default(x, val):
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
 
+def reshape_dim(t, dim, split_dims):
+    shape = list(t.shape)
+    num_dims = len(shape)
+    dim = (dim + num_dims) % num_dims
+    shape[dim:dim+1] = split_dims
+    return t.reshape(shape)
+
 def split_at_index(dim, index, t):
     pre_slices = (slice(None),) * dim
     l = (*pre_slices, slice(None, index))
@@ -178,12 +185,12 @@ class SelfAttention(nn.Module):
     def forward(self, x, memories = None, pos_emb = None, input_mask = None, calc_memory = True, **kwargs):
         b, t, e, h, dim_h = *x.shape, self.heads, self.dim_head
 
-        mem = cmem = None
-        if memories is not None:
-            mem, cmem = memories
+        memories = default(memories, (None, None))
+        mem, cmem = memories
 
-        mem = default(mem, lambda: torch.empty(b, 0, e, **to(x)))
-        cmem = default(cmem, lambda: torch.empty(b, 0, e, **to(x)))
+        init_empty_mem = lambda: torch.empty(b, 0, e, **to(x))
+        mem = default(mem, init_empty_mem)
+        cmem = default(cmem, init_empty_mem)
 
         mem_len = mem.shape[1]
         cmem_len = cmem.shape[1]
@@ -194,7 +201,7 @@ class SelfAttention(nn.Module):
         kv_len = kv_input.shape[1]
         k, v = self.to_kv(kv_input).chunk(2, dim=-1)
 
-        merge_heads = lambda x: x.reshape(*x.shape[:2], -1, dim_h).transpose(1, 2)
+        merge_heads = lambda x: reshape_dim(x, -1, (-1, dim_h)).transpose(1, 2)
         q, k, v = map(merge_heads, (q, k, v))
 
         k, v = map(lambda x: x.expand(-1, h, -1, -1), (k, v))
@@ -309,13 +316,13 @@ class CompressiveTransformer(nn.Module):
 
         assert t <= self.seq_len, f'input contains a sequence length {t} that is greater than the designated maximum sequence length {self.seq_len}'
 
-        mem = cmem = None
-        if memories is not None:
-            mem, cmem = memories
+        memories = default(memories, (None, None))
+        mem, cmem = memories
 
         num_memory_layers = len(self.memory_layers)
-        mem = default(mem, lambda: torch.empty(num_memory_layers, b, 0, d, **to(x)))
-        cmem = default(cmem, lambda: torch.empty(num_memory_layers, b, 0, d, **to(x)))
+        init_empty_mem = lambda: torch.empty(num_memory_layers, b, 0, d, **to(x))
+        mem = default(mem, init_empty_mem)
+        cmem = default(cmem, init_empty_mem)
 
         total_len = mem.shape[2] + cmem.shape[2] + self.seq_len
         pos_emb = self.pos_emb[:, (self.seq_len - t):total_len]
@@ -324,8 +331,7 @@ class CompressiveTransformer(nn.Module):
         next_cmem = []
         aux_loss = torch.tensor(0., requires_grad = True, **to(x))
 
-        mem_iter = iterate_tensor(mem)
-        cmem_iter = iterate_tensor(cmem)
+        mem_iter, cmem_iter = map(iterate_tensor, (mem, cmem))
 
         for ind, (attn, ff) in enumerate(zip(self.attn_layers, self.ff_layers)):
             layer_num = ind + 1
