@@ -335,20 +335,20 @@ class CompressiveTransformer(nn.Module):
 
         for ind, (attn, ff) in enumerate(zip(self.attn_layers, self.ff_layers)):
             layer_num = ind + 1
-            use_memory = layer_num in self.memory_layers
 
-            memories = None
-            if use_memory:
-                memories = (next(mem_iter), next(cmem_iter))
+            use_memory = layer_num in self.memory_layers
+            memories = (next(mem_iter), next(cmem_iter)) if use_memory else None
 
             x, (mem_out, cmem_out), layer_aux_loss = attn(x, memories = memories, calc_memory = use_memory, input_mask = mask, pos_emb = pos_emb)
-            x, = ff(x)
-
-            if use_memory:
-                next_mem.append(mem_out)
-                next_cmem.append(cmem_out)
+            x,  = ff(x)
 
             aux_loss = aux_loss + layer_aux_loss
+
+            if not use_memory:
+                continue
+
+            next_mem.append(mem_out)
+            next_cmem.append(cmem_out)
 
         out = self.to_logits(x)
 
