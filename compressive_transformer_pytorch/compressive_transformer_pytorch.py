@@ -84,7 +84,7 @@ class GRUGating(nn.Module):
         super().__init__()
         self.dim = dim
         self.fn = fn
-        self.gru = nn.GRU(dim, dim)
+        self.gru = nn.GRUCell(dim, dim)
         self.mogrify = Mogrifier(dim, factorize_k = dim // 4) if mogrify else None
 
     def forward(self, x, **kwargs):
@@ -95,9 +95,9 @@ class GRUGating(nn.Module):
         if self.mogrify is not None:
             y, x = self.mogrify(y, x)
 
-        gated_output, _ = self.gru(
-            y.reshape(1, -1, dim),
-            x.reshape(1, -1, dim)
+        gated_output = self.gru(
+            y.reshape(-1, dim),
+            x.reshape(-1, dim)
         )
 
         gated_output = gated_output.reshape(batch, -1, dim)
