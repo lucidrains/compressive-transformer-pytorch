@@ -260,13 +260,15 @@ class SelfAttention(nn.Module):
         if old_mem.shape[1] == 0 or self.cmem_len <= 0:
             return logits, Memory(new_mem, new_cmem), aux_loss
 
-        compressed_mem = self.compress_mem_fn(old_mem)
+        compressed_mem = self.compress_mem_fn(old_mem.detach())
         old_cmem, new_cmem = split_at_index(1, -self.cmem_len, torch.cat((cmem, compressed_mem), dim=1))
 
         if not self.training:
             return logits, Memory(new_mem, new_cmem), aux_loss
 
         # calculate compressed memory auxiliary loss if training
+
+        self.to_kv.weight.detach_()
 
         cmem_k, cmem_v = self.to_kv(compressed_mem).chunk(2, dim=-1)
         cmem_k, cmem_v = map(merge_heads, (cmem_k, cmem_v))
@@ -275,7 +277,7 @@ class SelfAttention(nn.Module):
         old_mem_range = slice(- min(mem_len, self.mem_len) - self.seq_len, -self.seq_len)
         old_mem_k, old_mem_v = map(lambda x: x[:, :, old_mem_range].clone(), (k, v))
 
-        q, old_mem_k, old_mem_v, cmem_k, cmem_v = map(torch.detach, (q, old_mem_k, old_mem_v, cmem_k, cmem_v))
+        q, old_mem_k, old_mem_v = map(torch.detach, (q, old_mem_k, old_mem_v))
 
         attn_fn = partial(full_attn, dropout_fn = self.reconstruction_attn_dropout)
 
