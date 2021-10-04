@@ -167,7 +167,7 @@ class FeedForward(nn.Module):
 # attention.
 
 class SelfAttention(nn.Module):
-    def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8, attn_dropout = 0., dropout = 0., reconstruction_attn_dropout = 0., one_kv_head = False):
+    def __init__(self, dim, seq_len, mem_len, cmem_len, cmem_ratio = 4, heads = 8, attn_dropout = 0., dropout = 0., reconstruction_attn_dropout = 0.):
         super().__init__()
         assert (dim % heads) == 0, 'dimension must be divisible by the number of heads'
 
@@ -182,9 +182,7 @@ class SelfAttention(nn.Module):
         self.compress_mem_fn = ConvCompress(dim, cmem_ratio)
 
         self.to_q = nn.Linear(dim, dim, bias = False)
-
-        kv_dim = self.dim_head if one_kv_head else dim
-        self.to_kv = nn.Linear(dim, kv_dim * 2, bias = False)
+        self.to_kv = nn.Linear(dim, dim * 2, bias = False)
         self.to_out = nn.Linear(dim, dim)
 
         self.attn_dropout = nn.Dropout(attn_dropout)
@@ -291,7 +289,28 @@ class SelfAttention(nn.Module):
 # transformer
 
 class CompressiveTransformer(nn.Module):
-    def __init__(self, num_tokens, dim, seq_len, depth, emb_dim = None, memory_layers = None, mem_len = None, cmem_len = None, cmem_ratio = 4, heads = 8, gru_gated_residual = True, mogrify_gru = False, attn_dropout = 0., ff_glu = False, ff_dropout = 0., attn_layer_dropout = 0., reconstruction_attn_dropout = 0., reconstruction_loss_weight = 1., one_kv_head = False):
+    def __init__(
+        self,
+        num_tokens,
+        dim,
+        seq_len,
+        depth,
+        emb_dim = None,
+        memory_layers = None,
+        enhanced_recurrence = True,
+        mem_len = None,
+        cmem_len = None,
+        cmem_ratio = 4,
+        heads = 8,
+        gru_gated_residual = True,
+        mogrify_gru = False,
+        attn_dropout = 0.,
+        ff_glu = False,
+        ff_dropout = 0.,
+        attn_layer_dropout = 0.,
+        reconstruction_attn_dropout = 0.,
+        reconstruction_loss_weight = 1.
+    ):
         super().__init__()
         emb_dim = default(emb_dim, dim)
         mem_len = default(mem_len, seq_len)
@@ -306,6 +325,7 @@ class CompressiveTransformer(nn.Module):
 
         self.depth = depth
         self.memory_layers = list(memory_layers)
+        self.enhanced_recurrence = enhanced_recurrence
 
         self.token_emb = nn.Embedding(num_tokens, emb_dim)
         self.to_model_dim = nn.Identity() if emb_dim == dim else nn.Linear(emb_dim, dim)
@@ -320,7 +340,7 @@ class CompressiveTransformer(nn.Module):
 
         wrapper = partial(GRUGating, dim, mogrify = mogrify_gru) if gru_gated_residual else Residual
 
-        self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout, reconstruction_attn_dropout = reconstruction_attn_dropout, one_kv_head = one_kv_head))) for _ in range(depth)])
+        self.attn_layers = nn.ModuleList([wrapper(PreNorm(dim, SelfAttention(dim, seq_len, mem_len, cmem_len, cmem_ratio, heads, dropout = attn_layer_dropout, attn_dropout = attn_dropout, reconstruction_attn_dropout = reconstruction_attn_dropout))) for _ in range(depth)])
         self.ff_layers = nn.ModuleList([wrapper(PreNorm(dim, FeedForward(dim, dropout = ff_dropout, glu = ff_glu))) for _ in range(depth)])
 
         self.reconstruction_loss_weight = reconstruction_loss_weight
@@ -346,6 +366,10 @@ class CompressiveTransformer(nn.Module):
         next_mem = []
         next_cmem = []
         aux_loss = torch.tensor(0., requires_grad = True, **to(x))
+
+        if self.enhanced_recurrence:
+            mem = torch.roll(mem, -1, 0)
+            cmem = torch.roll(cmem, -1, 0)
 
         mem_iter, cmem_iter = map(iterate_tensor, (mem, cmem))
 

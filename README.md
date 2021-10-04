@@ -34,7 +34,6 @@ model = CompressiveTransformer(
     gru_gated_residual = True,     # whether to gate the residual intersection, from 'Stabilizing Transformer for RL' paper
     mogrify_gru = False,           # experimental feature that adds a mogrifier for the update and residual before gating by the GRU
     memory_layers = range(6, 13),  # specify which layers to use long-range memory, from 'Do Transformers Need LR Memory' paper
-    one_head_kv = True,            # share one key/value head for all queries, from Shazeers 'One Write-Head is All You Need'
     ff_glu = True                  # use GLU variant for feedforward
 )
 
@@ -91,37 +90,37 @@ sample = model.generate(prime, 4096)
 
 ```bibtex
 @misc{rae2019compressive,
-    title={Compressive Transformers for Long-Range Sequence Modelling},
-    author={Jack W. Rae and Anna Potapenko and Siddhant M. Jayakumar and Timothy P. Lillicrap},
-    year={2019},
-    eprint={1911.05507},
-    archivePrefix={arXiv},
-    primaryClass={cs.LG}
+    title   = {Compressive Transformers for Long-Range Sequence Modelling},
+    author  = {Jack W. Rae and Anna Potapenko and Siddhant M. Jayakumar and Timothy P. Lillicrap},
+    year    = {2019},
+    eprint  = {1911.05507},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
 
 ```bibtex
 @misc{parisotto2019stabilizing,
-    title={Stabilizing Transformers for Reinforcement Learning},
-    author={Emilio Parisotto and H. Francis Song and Jack W. Rae and Razvan Pascanu and Caglar Gulcehre and Siddhant M. Jayakumar and Max Jaderberg and Raphael Lopez Kaufman and Aidan Clark and Seb Noury and Matthew M. Botvinick and Nicolas Heess and Raia Hadsell},
-    year={2019},
-    eprint={1910.06764},
-    archivePrefix={arXiv},
-    primaryClass={cs.LG}
+    title   = {Stabilizing Transformers for Reinforcement Learning},
+    author  = {Emilio Parisotto and H. Francis Song and Jack W. Rae and Razvan Pascanu and Caglar Gulcehre and Siddhant M. Jayakumar and Max Jaderberg and Raphael Lopez Kaufman and Aidan Clark and Seb Noury and Matthew M. Botvinick and Nicolas Heess and Raia Hadsell},
+    year    = {2019},
+    eprint  = {1910.06764},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
 
 ```bibtex
 @inproceedings{rae-razavi-2020-transformers,
-    title = "Do Transformers Need Deep Long-Range Memory?",
-    author = "Rae, Jack  and
+    title   = "Do Transformers Need Deep Long-Range Memory?",
+    author  = "Rae, Jack  and
       Razavi, Ali",
     booktitle = "Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics",
-    month = jul,
-    year = "2020",
+    month   = jul,
+    year    = "2020",
     address = "Online",
     publisher = "Association for Computational Linguistics",
-    url = "https://www.aclweb.org/anthology/2020.acl-main.672"
+    url     = "https://www.aclweb.org/anthology/2020.acl-main.672"
 }
 ```
 
@@ -150,5 +149,16 @@ sample = model.generate(prime, 4096)
     author      = {Zhenzhong Lan and Mingda Chen and Sebastian Goodman and Kevin Gimpel and Piyush Sharma and Radu Soricut},
     year        = {2019},
     url         = {https://arxiv.org/abs/1909.11942}
+}
+```
+
+```bibtex
+@misc{ding2021erniedoc,
+    title   = {ERNIE-Doc: A Retrospective Long-Document Modeling Transformer},
+    author  = {Siyu Ding and Junyuan Shang and Shuohuan Wang and Yu Sun and Hao Tian and Hua Wu and Haifeng Wang},
+    year    = {2021},
+    eprint  = {2012.15688},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
 }
 ```
